@@ -1,0 +1,9 @@
+# Sablja Reader - run from source with:
+#   pip install -r requirements.txt
+#   python SabljaReader.py
+customtkinter
+pillow
+beautifulsoup4
+requests
+curl_cffi     # optional: Chrome/Firefox TLS fingerprint for Cloudflare-protected sources
+miniaudio     # optional: lofi radio player (the app runs without it, you just lose the radio)
