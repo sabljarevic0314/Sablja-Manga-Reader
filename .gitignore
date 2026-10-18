@@ -1,0 +1,22 @@
+# ---- build output (rebuild with .\build.ps1) ----
+/build/
+/dist/
+*.spec.bak
+
+# ---- your library, progress, cache and downloads: never commit these ----
+/data/
+/installer/tools/
+/installer/stage/
+/installer/*.sed
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---- editors / os ----
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
