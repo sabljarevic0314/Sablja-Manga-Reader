@@ -28,39 +28,46 @@ MD_API = "https://api.mangadex.org"
 # The chrome colours follow the chosen background, so the flat menu areas sit on the
 # same surface as the textured sidebar/reader instead of fighting it. theme_pick()
 # swaps these when the Background setting changes.
-ROLES = ("BG", "SIDE", "PANEL", "CARD", "CARD_HI", "BTN", "BTN_HI", "LINE", "READER_BG")
+ROLES = ("BG", "SIDE", "PANEL", "CARD", "CARD_HI", "BTN", "BTN_HI", "LINE", "READER_BG",
+         "TEXT", "MUTED", "SILVER", "SILVER_HI", "SILVER_DIM", "INK")
+_TXT_DARK = {"TEXT": "#e7e9ed", "MUTED": "#8a8f99", "SILVER": "#c5cad3",
+             "SILVER_HI": "#e8ebf0", "SILVER_DIM": "#7d838e", "INK": "#14151a"}
+_TXT_PAPER = {"TEXT": "#37342c", "MUTED": "#6f6a5d", "SILVER": "#575245",
+              "SILVER_HI": "#2a2822", "SILVER_DIM": "#8b8574", "INK": "#f4efe3"}
 PALETTES = {
     "Off": {"BG": "#131417", "SIDE": "#0f1012", "PANEL": "#1b1c20", "CARD": "#222428",
             "CARD_HI": "#2d2f36", "BTN": "#2b2d33", "BTN_HI": "#3a3d45", "LINE": "#32353c",
-            "READER_BG": "#0c0c0e"},
+            "READER_BG": "#0c0c0e", **_TXT_DARK},
     "Graphite matte": {"BG": "#1d1e22", "SIDE": "#1c1d21", "PANEL": "#24252a", "CARD": "#2b2d33",
                        "CARD_HI": "#373941", "BTN": "#2d2f35", "BTN_HI": "#3c3f47", "LINE": "#35383f",
-                       "READER_BG": "#1a1b1f"},
+                       "READER_BG": "#1a1b1f", **_TXT_DARK},
     "Ink matte": {"BG": "#101113", "SIDE": "#0f1012", "PANEL": "#17181c", "CARD": "#1e2024",
                   "CARD_HI": "#292b31", "BTN": "#202226", "BTN_HI": "#2e3038", "LINE": "#272a30",
-                  "READER_BG": "#0e0e10"},
+                  "READER_BG": "#0e0e10", **_TXT_DARK},
+    "Paper": {"BG": "#ded7c6", "SIDE": "#d8d1bf", "PANEL": "#eae3d2", "CARD": "#f4eedd",
+              "CARD_HI": "#e2dbc9", "BTN": "#e3dccb", "BTN_HI": "#d3cbb6", "LINE": "#b3aa93",
+              "READER_BG": "#8f8878", **_TXT_PAPER},
 }
-BG, SIDE, PANEL, CARD, CARD_HI = "#131417", "#0f1012", "#1b1c20", "#222428", "#2d2f36"
-BTN, BTN_HI, LINE = "#2b2d33", "#3a3d45", "#32353c"
+LIGHT_PAPERS = ("Paper",)
+BG, SIDE, PANEL, CARD, CARD_HI = "#1d1e22", "#1c1d21", "#24252a", "#2b2d33", "#373941"
+BTN, BTN_HI, LINE = "#2d2f35", "#3c3f47", "#35383f"
 SILVER, SILVER_HI, SILVER_DIM, INK = "#c5cad3", "#e8ebf0", "#7d838e", "#14151a"
-TEXT, MUTED, READER_BG = "#e7e9ed", "#8a8f99", "#0c0c0e"
+TEXT, MUTED, READER_BG = "#e7e9ed", "#8a8f99", "#1a1b1f"
 FONT = ("Segoe UI", 12)
 
 MODES = ["Webtoon (vertical)", "Single · left→right", "Single · right→left", "Double · left→right", "Double · right→left"]
 ZOOMS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
 # paper textures (the "hardback" look) - the names are what Settings shows
-PAPERS = ["Off", "Graphite matte", "Ink matte"]
-PAPER_RGB = {"Graphite matte": (41, 42, 46), "Ink matte": (23, 24, 27)}
-PAPER_KIND = {"Graphite matte": "matte", "Ink matte": "matte"}
+PAPERS = ["Off", "Graphite matte", "Ink matte", "Paper"]
+PAPER_RGB = {"Graphite matte": (41, 42, 46), "Ink matte": (23, 24, 27), "Paper": (226, 219, 200)}
+PAPER_KIND = {"Graphite matte": "matte", "Ink matte": "matte", "Paper": "matte"}
 PAGE_BORDER = 5     # black contour drawn around a page in the paged modes
 PAGE_GAP = 16       # black gutter between the two halves of a double spread
 DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
             "dl_dir": os.path.join(BASE, "downloads"), "nsfw": True,
-            "show_arrows": True, "paged_guides": True, "paper": "Graphite matte"}
+            "paged_guides": True, "paper": "Graphite matte",
+            "show_history": True}
 
-# reading-direction hints shown briefly at the start of every chapter
-ARROWS = {"webtoon": "↓   scroll down", "ltr": "→   click the right side / press the right arrow",
-          "rtl": "←   click the left side / press the left arrow"}
 DL_VIEW_CHIP = "__downloaded__"
 
 
@@ -597,44 +604,20 @@ def paper_avg(name):
 
 
 def theme_pick(paper):
-    """Adopt the palette that belongs with a background.
+    """Adopt the palette that belongs with a background (chrome + text roles).
 
-    Returns the {old colour: new colour} pairs, so an already-built window can be
-    recoloured in place instead of being torn down and rebuilt.
+    Also flips customtkinter's own appearance mode: CTk resolves every "transparent"
+    widget against its theme's window colour, so a light palette needs "light" or the
+    scroll areas and menu frames stay dark.
     """
-    global BG, SIDE, PANEL, CARD, CARD_HI, BTN, BTN_HI, LINE, READER_BG
-    cur = {"BG": BG, "SIDE": SIDE, "PANEL": PANEL, "CARD": CARD, "CARD_HI": CARD_HI,
-           "BTN": BTN, "BTN_HI": BTN_HI, "LINE": LINE, "READER_BG": READER_BG}
     want = PALETTES.get(paper) or PALETTES["Off"]
-    if all(cur[r] == want[r] for r in ROLES):
-        return {}
-    BG, SIDE, PANEL, CARD, CARD_HI = want["BG"], want["SIDE"], want["PANEL"], want["CARD"], want["CARD_HI"]
-    BTN, BTN_HI, LINE = want["BTN"], want["BTN_HI"], want["LINE"]
-    READER_BG = want["READER_BG"]
-    return {cur[r].lower(): want[r] for r in ROLES if cur[r] != want[r]}
-
-
-def retint(widget, mapping):
-    """Recolour a built widget tree in place. Tk/CTk only - canvas items repaint themselves."""
-    if not mapping:
-        return
-    for w in widget.winfo_children():
-        for prop in ("fg_color", "hover_color", "bg", "fg"):
-            try:
-                old = w.cget(prop)
-            except Exception:
-                continue
-            if not isinstance(old, str):
-                continue
-            new = mapping.get(old.lower())
-            if new is None and old == "transparent":
-                new = "transparent"   # re-resolve "transparent" against the new parent colour
-            if new is not None:
-                try:
-                    w.configure(**{prop: new})
-                except Exception:
-                    pass
-        retint(w, mapping)
+    g = globals()
+    for r in ROLES:
+        g[r] = want[r]
+    try:
+        ctk.set_appearance_mode("light" if paper in LIGHT_PAPERS else "dark")
+    except Exception:
+        pass
 
 
 def make_icon_file(path):
@@ -664,6 +647,8 @@ def save_db():
 
 def S(k):
     v = DB["set"].get(k, DEFAULTS[k])
+    if v == "Paper white":                 # renamed in 1.2 while it was still an experiment
+        v = "Paper"
     if k == "paper" and v not in PAPERS:   # older builds saved "Grey paper"/"Dark blue paper"
         v = DEFAULTS["paper"]
     return v
@@ -1395,6 +1380,23 @@ def clear(f):
         w.destroy()
 
 
+def age_str(ts):
+    """'just now' / '5 min ago' / '3 h ago' / '2 d ago' for history captions."""
+    try:
+        d = max(0, int(time.time() - float(ts)))
+    except Exception:
+        return ""
+    if d < 90:
+        return "just now"
+    if d < 3600:
+        return f"{d // 60} min ago"
+    if d < 86400:
+        return f"{d // 3600} h ago"
+    if d < 86400 * 30:
+        return f"{d // 86400} d ago"
+    return time.strftime("%d %b %Y", time.localtime(float(ts)))
+
+
 def set_img(widget, im, size=None):
     if im is None:
         return
@@ -1468,140 +1470,12 @@ def random_pick(avoid):
     return None
 
 
-# ---------------- lofi radio ----------------
-class Lofi:
-    """Internet-radio player (needs `pip install miniaudio`). Streams are found through the free
-    radio-browser.info directory (tag "lofi", MP3 only), with SomaFM Groove Salad as a fallback."""
-    API = ["https://de1.api.radio-browser.info", "https://de2.api.radio-browser.info",
-           "https://nl1.api.radio-browser.info", "https://at1.api.radio-browser.info"]
-    QUERY = "/json/stations/search?tag=lofi&codec=MP3&hidebroken=true&order=votes&reverse=true&limit=25"
-    FALLBACK = [("SomaFM Groove Salad", "https://ice1.somafm.com/groovesalad-128-mp3"),
-                ("SomaFM Groove Salad", "https://ice2.somafm.com/groovesalad-128-mp3")]
-
-    def __init__(self):
-        self.state, self.name, self.i = "off", "", 0       # state: off | connecting | on | error
-        self.stations, self.on_change = None, None
-        self._gen, self._dev, self._src = 0, None, None
-        self._lock = threading.Lock()
-
-    @staticmethod
-    def available():
-        try:
-            import miniaudio  # noqa: F401
-            return True
-        except Exception:
-            return False
-
-    def _notify(self):
-        if self.on_change:
-            Q.put((self.on_change, ()))
-
-    def _close(self):
-        with self._lock:
-            dev, src, self._dev, self._src = self._dev, self._src, None, None
-        for o, fn in ((dev, "stop"), (dev, "close"), (src, "close")):
-            try:
-                if o is not None:
-                    getattr(o, fn)()
-            except Exception:
-                pass
-
-    def _stations(self):
-        if self.stations:
-            return self.stations
-        out = []
-        for base in self.API:
-            try:
-                r = requests.get(base + self.QUERY, headers={"User-Agent": "SabljaReader/1.0"}, timeout=8)
-                r.raise_for_status()
-                for s in r.json():
-                    u = (s.get("url_resolved") or "").strip()
-                    if u.startswith("http") and s.get("lastcheckok", 1):
-                        out.append(((s.get("name") or "Lofi radio").strip() or "Lofi radio", u))
-                if out:
-                    break
-            except Exception:
-                continue
-        self.stations = out + self.FALLBACK
-        return self.stations
-
-    @staticmethod
-    def _probe(url):
-        """Quick reachability check so a dead station fails in seconds instead of hanging."""
-        try:
-            with requests.get(url, headers={"User-Agent": "SabljaReader/1.0"}, stream=True, timeout=(6, 6)) as r:
-                ct = (r.headers.get("content-type") or "").lower()
-                return r.status_code < 400 and ("mpeg" in ct or "mp3" in ct)
-        except Exception:
-            return False
-
-    def _run(self, gen, step):
-        import miniaudio
-        self._close()
-        st = self._stations()
-        for k in range(len(st)):
-            if gen != self._gen:
-                return
-            idx = (self.i + step + k) % len(st)
-            name, url = st[idx]
-            if not self._probe(url):
-                continue
-            src = dev = None
-            try:
-                src = miniaudio.IceCastClient(url)
-                dev = miniaudio.PlaybackDevice()
-                dev.start(miniaudio.stream_any(src, src.audio_format))
-            except Exception:
-                for o in (dev, src):
-                    try:
-                        o and o.close()
-                    except Exception:
-                        pass
-                continue
-            with self._lock:
-                ok = gen == self._gen
-                if ok:
-                    self._dev, self._src = dev, src
-            if not ok:
-                for o in (dev, src):
-                    try:
-                        o.close()
-                    except Exception:
-                        pass
-                return
-            self.i, self.name, self.state = idx, name, "on"
-            self._notify()
-            return
-        if gen == self._gen:
-            self.state, self.name = "error", ""
-            self._notify()
-
-    def start(self, step=0):
-        """False when the miniaudio package is missing."""
-        if not self.available():
-            return False
-        self._gen += 1
-        self.state = "connecting"
-        self._notify()
-        threading.Thread(target=self._run, args=(self._gen, step), daemon=True).start()
-        return True
-
-    def stop(self):
-        self._gen += 1
-        self.state, self.name = "off", ""
-        threading.Thread(target=self._close, daemon=True).start()
-        self._notify()
-
-
-LOFI = Lofi()
-
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
         theme_pick(S("paper"))          # the saved background decides the chrome palette
-        self.configure(fg_color=BG)
         self.title("Sablja Reader")
         self.geometry("1280x800")
         self.minsize(1000, 640)
@@ -1624,8 +1498,25 @@ class App(ctk.CTk):
         self._seen_titles = set()
         self.rand_mode, self._rand_open, self.rdm_tok = False, False, 0
         self.rand_hist, self.rand_i, self.rand_seen = [], -1, set()
-        LOFI.on_change = self.lofi_refresh
+        self._fresh, self._fresh_thr, self._fresh_last = {}, None, 0
+        self.nav_build()
         rebuild_sources()
+        self.bind_all("<MouseWheel>", self.on_wheel, add="+")
+        self.bind_all("<Key>", self.on_key, add="+")
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.build_ui()
+        self.after(60, self.poll)
+        self.after(500, self.watch)
+
+    def build_ui(self):
+        """Create the whole window: sidebar canvas, views and every view's widgets.
+
+        Kept separate from __init__ so a theme change can throw the old widgets away and
+        rebuild from scratch — recolouring hundreds of live widgets in place kept leaving
+        parts of the window (notably scroll areas) on the previous palette.
+        """
+        self.configure(fg_color=BG)
+        style_ttk()                     # ttk treeviews need the palette re-applied after a theme change
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -1633,7 +1524,6 @@ class App(ctk.CTk):
         # through the menu (a CTk frame always paints a flat colour on top of it).
         self.side = tk.Canvas(self, width=210, highlightthickness=0, bd=0, bg=SIDE)
         self.side.grid(row=0, column=0, sticky="ns")
-        self.nav_order = ["Library", "Rating", "Sources", "Search", "Randomizer", "Downloads", "Settings"]
         self.nav, self._nav_items, self._hover, self._logo_img = {}, {}, None, None
         self.side.bind("<Configure>", lambda e: self.paint_side())
         self.after(40, self.paint_side)
@@ -1641,17 +1531,34 @@ class App(ctk.CTk):
         self.main = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
         self.main.grid(row=0, column=1, sticky="nsew")
         self.views = {n: ctk.CTkFrame(self.main, fg_color="transparent", corner_radius=0)
-                      for n in self.nav_order + ["Details", "Reader"]}
-        self.build_library(); self.build_rating(); self.build_sources(); self.build_search(); self.build_downloads()
+                      for n in ["Library", "History", "Rating", "Sources", "Search", "Randomizer",
+                                "Downloads", "Settings", "Details", "Reader"]}
+        self.build_library(); self.build_history(); self.build_rating(); self.build_sources()
+        self.build_search(); self.build_downloads()
         self.build_settings(); self.build_details(); self.build_reader()
-        self.refresh = {"Library": self.refresh_library, "Rating": self.refresh_rating, "Sources": self.refresh_sources,
+        self.refresh = {"Library": self.refresh_library, "History": self.refresh_history,
+                        "Rating": self.refresh_rating, "Sources": self.refresh_sources,
                         "Settings": self.refresh_settings, "Search": self.refresh_search}
-        self.bind_all("<MouseWheel>", self.on_wheel, add="+")
-        self.bind_all("<Key>", self.on_key, add="+")
-        self.protocol("WM_DELETE_WINDOW", self.close)
-        self.show("Library")
-        self.after(60, self.poll)
-        self.after(500, self.watch)
+        self.show(self.cur or "Library")
+
+    def rebuild_ui(self):
+        """Throw the widgets away and build them again (used by the theme switch)."""
+        if getattr(self, "_rebuilding", False):
+            return
+        self._rebuilding = True
+        try:
+            keep = self.cur if self.cur in ("Library", "History", "Rating", "Sources", "Search",
+                                            "Randomizer", "Downloads", "Settings") else "Library"
+            for w in self.winfo_children():
+                w.destroy()
+            self.cur, self.reader, self.cur_detail, self.b = None, None, None, None
+            self.rand_mode, self._rand_open = False, False
+            self.desc_full, self.desc, self.sel = False, True, set()
+            self.nav_build()
+            self.build_ui()
+            self.show(keep)
+        finally:
+            self._rebuilding = False
 
     # ----- plumbing -----
     def poll(self):
@@ -1684,7 +1591,6 @@ class App(ctk.CTk):
         self.after(350, self.watch)
 
     def close(self):
-        LOFI.stop()
         if self.cur == "Reader":
             self.save_reader()
         self.destroy()
@@ -1701,6 +1607,18 @@ class App(ctk.CTk):
         self.nav_hl(name)
         if name in self.refresh:
             self.refresh[name]()
+
+    def nav_build(self):
+        """Sidebar entries; History can be hidden from Settings."""
+        base = ["Library", "History", "Rating", "Sources", "Search", "Randomizer", "Downloads", "Settings"]
+        self.nav_order = [n for n in base if n != "History" or S("show_history")]
+
+    def set_history_visible(self, on):
+        self.setv("show_history", bool(on))
+        self.nav_build()
+        self.paint_side()
+        if not S("show_history") and self.cur == "History":
+            self.show("Library")
 
     # ----- sidebar (canvas so the paper texture shows) -----
     def paint_side(self):
@@ -1736,18 +1654,6 @@ class App(ctk.CTk):
             c.tag_bind(tag, "<Button-1>", lambda e, n=n: self.nav_click(n))
             c.tag_bind(tag, "<Enter>", lambda e, n=n: self.nav_hover(n, True))
             c.tag_bind(tag, "<Leave>", lambda e, n=n: self.nav_hover(n, False))
-        ly = max(h - 84, 122 + len(self.nav_order) * 44 + 8)
-        c.create_rectangle(12, ly, w - 12, ly + 38, fill=PANEL, outline=LINE, tags=("lofi",))
-        self._lofi_txt = c.create_text(28, ly + 19, anchor="w", text="", fill=MUTED, font=("Segoe UI", 12), tags=("lofi",))
-        self._lofi_sub = c.create_text(28, ly + 48, anchor="w", text="", fill=SILVER_DIM, font=("Segoe UI", 9))
-        self._lofi_skip = c.create_text(w - 26, ly + 19, anchor="e", text="\u23ed", fill=SILVER, font=("Segoe UI", 14),
-                                        tags=("lofi_next",), state="hidden")
-        c.tag_bind("lofi", "<Button-1>", lambda e: self.lofi_toggle())
-        c.tag_bind("lofi_next", "<Button-1>", lambda e: LOFI.start(1))
-        for tg in ("lofi", "lofi_next"):
-            c.tag_bind(tg, "<Enter>", lambda e: c.configure(cursor="hand2"))
-            c.tag_bind(tg, "<Leave>", lambda e: c.configure(cursor=""))
-        self.lofi_refresh()
         self.nav_hl(self.cur or "Library")
 
     def nav_hover(self, n, on):
@@ -1773,7 +1679,7 @@ class App(ctk.CTk):
         return max(2, (self.main.winfo_width() - 80 - extra) // card)
 
     # ----- cards -----
-    def grid_cards(self, parent, items, cols, cb, start=0, small=False, ctx=None):
+    def grid_cards(self, parent, items, cols, cb, start=0, small=False, ctx=None, badge_fn=None):
         def step(lo):
             try:
                 if not parent.winfo_exists():
@@ -1781,17 +1687,23 @@ class App(ctk.CTk):
             except Exception:
                 return
             for i in range(lo, min(lo + 6, len(items))):
-                self.make_card(parent, items[i], start + i, cols, cb, small, ctx)
+                it = items[i]
+                badge = badge_fn(it) if badge_fn else 0
+                self.make_card(parent, it, start + i, cols, cb, small, ctx, badge)
             if lo + 6 < len(items):
                 self.after(10, lambda: step(lo + 6))
         step(0)
 
-    def make_card(self, parent, m, i, cols, cb, small=False, ctx=None):
+    def make_card(self, parent, m, i, cols, cb, small=False, ctx=None, badge=0):
         iw, ih = (104, 148) if small else (138, 196)
         card = ctk.CTkFrame(parent, width=iw + 12, corner_radius=12, fg_color=CARD)
         card.grid(row=i // cols, column=i % cols, padx=6, pady=6, sticky="n")
         img = ctk.CTkLabel(card, text="", width=iw, height=ih, corner_radius=8, fg_color=PANEL)
         img.pack(padx=6, pady=(6, 2))
+        if badge and badge > 0:
+            ctk.CTkLabel(card, text=f"\U0001f195{badge}", corner_radius=9, fg_color=BTN_HI, text_color=SILVER_HI,
+                         font=("Segoe UI", 10, "bold"), width=26, height=18, bg_color=PANEL
+                         ).place(relx=1.0, rely=0.0, x=-10, y=8, anchor="ne")
         t = m["title"] if len(m["title"]) < 46 else m["title"][:43] + "…"
         ttl = ctk.CTkLabel(card, text=t, wraplength=iw - 6, height=34 if small else 44, font=("Segoe UI", 11 if small else 12), text_color=TEXT)
         ttl.pack(padx=6, pady=(0, 6))
@@ -1878,7 +1790,152 @@ class App(ctk.CTk):
             ctk.CTkLabel(self.lib_scroll, text=msg, font=("Segoe UI", 14), text_color=MUTED).pack(pady=90)
         else:
             self.grid_cards(self.lib_scroll, shown, self.cols_for(), self.open_manga,
+                            badge_fn=self.new_chapter_count,
                             ctx=self.dl_ctx if self.lib_folder == DL_VIEW_CHIP else self.lib_ctx)
+            self.check_new_chapters()
+
+    # ----- history -----
+    def build_history(self):
+        v = self.views["History"]
+        top = ctk.CTkFrame(v, fg_color="transparent")
+        top.pack(fill="x", padx=28, pady=(24, 6))
+        self.title_label(top, "History").pack(side="left")
+        btn(top, "Clear history", self.clear_history, width=120).pack(side="right")
+        ctk.CTkLabel(v, text="Everything you have read, newest first — click a card to jump straight back in, "
+                             "right-click to remove one. Hide this section in Settings.",
+                     anchor="w", text_color=SILVER_DIM, font=("Segoe UI", 11)).pack(fill="x", padx=30, pady=(0, 6))
+        self.hist_scroll = ctk.CTkScrollableFrame(v, fg_color="transparent")
+        self.hist_scroll.pack(fill="both", expand=True, padx=18, pady=(0, 12))
+
+    def hist_entries(self):
+        """Newest-first history rows: (ts, key, manga, progress).
+
+        Entries written before History existed have no stored manga info, so they resolve
+        from bookmarks, the last-read record, or finally the URL slug — and they heal
+        themselves the next time the chapter is opened."""
+        bm = {pkey(b): b for b in DB["bookmarks"]}
+        last = DB["last"] or {}
+        out = []
+        for key, p in DB["progress"].items():
+            if not p.get("chapter"):
+                continue
+            m = p.get("manga") or bm.get(key)
+            if not m and last.get("key") == key:
+                m = last.get("manga")
+            if not m:
+                src_id, _, url = key.partition("|")
+                tail = url.rstrip("/").split("/")[-1] or url
+                title = re.sub(r"[-_]+", " ", tail).strip()[:44] or "Unknown title"
+                m = {"source": src_id, "url": url, "title": title.title(), "cover": ""}
+            out.append((p.get("ts") or 0, key, m, p))
+        out.sort(key=lambda t: t[0], reverse=True)
+        return out
+
+    def refresh_history(self):
+        clear(self.hist_scroll)
+        rows = self.hist_entries()
+        if not rows:
+            ctk.CTkLabel(self.hist_scroll, text="Nothing read yet.\nOpen a chapter and it shows up here.",
+                         font=("Segoe UI", 14), text_color=MUTED, justify="left").pack(pady=90)
+            return
+        cols = self.cols_for(card=250)
+        for i, (ts, key, m, p) in enumerate(rows):
+            self.make_hist_card(self.hist_scroll, key, m, p, i, cols)
+
+    def make_hist_card(self, parent, key, m, p, i, cols):
+        iw, ih = 84, 118
+        card = ctk.CTkFrame(parent, width=iw + 168, height=ih + 14, corner_radius=12, fg_color=CARD)
+        card.grid(row=i // cols, column=i % cols, padx=6, pady=6, sticky="nw")
+        card.grid_propagate(False)
+        cov = ctk.CTkLabel(card, text="", width=iw, height=ih, corner_radius=8, fg_color=PANEL)
+        cov.pack(side="left", padx=(8, 10), pady=7)
+        right = ctk.CTkFrame(card, fg_color="transparent")
+        right.pack(side="left", fill="both", expand=True, padx=(0, 10), pady=8)
+        ctk.CTkLabel(right, text=m.get("title", "?"), font=("Segoe UI", 12, "bold"), text_color=TEXT,
+                     wraplength=142, justify="left", anchor="w").pack(fill="x")
+        ctk.CTkLabel(right, text=(p.get("title") or "Chapter")[:28], font=("Segoe UI", 11), text_color=SILVER,
+                     wraplength=142, justify="left", anchor="w").pack(fill="x", pady=(4, 0))
+        ctk.CTkLabel(right, text=f'page {min(p.get("page", 0) + 1, 9999)} · {age_str(p.get("ts"))}',
+                     font=("Segoe UI", 10), text_color=MUTED, anchor="w").pack(fill="x", pady=(2, 0))
+        for w in (card, cov, right):
+            w.bind("<Button-1>", lambda e, m=m: self.open_manga(m, resume=True))
+            w.bind("<Enter>", lambda e, k=card: k.configure(fg_color=CARD_HI))
+            w.bind("<Leave>", lambda e, k=card: k.configure(fg_color=CARD))
+            w.bind("<Button-3>", lambda e, k=key: self.popup(e, [("Remove from history", lambda: self.hist_remove(k))]))
+            w.configure(cursor="hand2")
+        load_img(SOURCES.get(m.get("source")), m.get("cover"), lambda im, l=cov: set_img(l, im, (iw, ih)), size=(iw, ih))
+
+    def hist_remove(self, key):
+        DB["progress"].pop(key, None)
+        if DB["last"] and DB["last"].get("key") == key:
+            DB["last"] = None
+        save_db()
+        self.refresh_history()
+        self.refresh_library()
+
+    def clear_history(self):
+        if not messagebox.askyesno("History", "Remove the reading history for every series?\n\n"
+                                              "This forgets the chapter and page each series was left on "
+                                              "(bookmarks, ratings and downloaded chapters are kept)."):
+            return
+        for key in [k for k, p in DB["progress"].items() if p.get("manga") and p.get("chapter")]:
+            DB["progress"].pop(key, None)
+        DB["last"] = None
+        save_db()
+        self.refresh_history()
+        self.refresh_library()
+
+    # ----- new-chapter check (bookmarks) -----
+    def new_chapter_count(self, m):
+        try:
+            return self._fresh.get(pkey(m), {}).get("n", 0)
+        except Exception:
+            return 0
+
+    def check_new_chapters(self, force=False):
+        """Walk the bookmarked series in one background thread and compare each source's
+        latest chapter with this profile's progress; results become 'new' badges in Library.
+        Runs at most every 10 minutes."""
+        now = time.time()
+        if getattr(self, "_fresh_thr", None) is not None and self._fresh_thr.is_alive():
+            return
+        if not force and now - getattr(self, "_fresh_last", 0) < 600:
+            return
+        self._fresh_last = now
+
+        def run():
+            out = {}
+            for b in list(DB["bookmarks"]):
+                src = SOURCES.get(b.get("source"))
+                if not src or not b.get("url"):
+                    continue
+                try:
+                    chs = (src.details(b["url"]) or {}).get("chapters") or []
+                except Exception:
+                    continue
+                key = pkey(b)
+                prog = DB["progress"].get(key, {})
+                seen = set(prog.get("read") or [])
+                cur = prog.get("chapter")
+                i_last = -1
+                for i, c2 in enumerate(chs):
+                    if c2.get("url") == cur or c2.get("url") in seen:
+                        i_last = i
+                if i_last < 0:
+                    continue          # bookmarked but never opened: no badge
+                n = len(chs) - 1 - i_last
+                if n > 0:
+                    out[key] = {"n": n}
+            Q.put((self.apply_fresh, (out, None)))
+
+        self._fresh_thr = threading.Thread(target=run, daemon=True)
+        self._fresh_thr.start()
+
+    def apply_fresh(self, out, _=None):
+        old = dict(self._fresh)
+        self._fresh = out
+        if self.cur == "Library" and old != out:
+            self.refresh_library()
 
     # ----- rating -----
     def build_rating(self):
@@ -1941,10 +1998,21 @@ class App(ctk.CTk):
         cur = get_rating(m) or {}
         win = ctk.CTkToplevel(self)
         win.title("Rate / comment")
-        win.geometry("540x410")
+        # Windows DPI scaling (125-150%) shrinks the physical window, pushing the
+        # Save button off-screen on smaller laptops - multiply the size by CTk's scale.
+        try:
+            sc = ctk.ScalingTracker.get_widget_scaling(win)
+        except Exception:
+            sc = 1.0
+        win.geometry("%dx%d" % (int(600 * sc), int(500 * sc)))
+        win.minsize(int(540 * sc), int(460 * sc))
         win.configure(fg_color=BG)
+        # Pack the button row FIRST and pinned to the bottom: whatever the window
+        # size or DPI scale, the buttons can no longer be pushed out of view.
+        row2 = ctk.CTkFrame(win, fg_color="transparent")
+        row2.pack(side="bottom", fill="x", padx=22, pady=(8, 14))
         ctk.CTkLabel(win, text=m.get("title", "?"), font=("Segoe UI", 16, "bold"), text_color=SILVER_HI,
-                     wraplength=490, justify="left", anchor="w").pack(fill="x", padx=22, pady=(20, 0))
+                     wraplength=int(540 * sc), justify="left", anchor="w").pack(fill="x", padx=22, pady=(20, 0))
         ctk.CTkLabel(win, text="Your score (1-10)", text_color=MUTED, anchor="w").pack(fill="x", padx=22, pady=(14, 0))
         row = ctk.CTkFrame(win, fg_color="transparent")
         row.pack(fill="x", padx=22, pady=(4, 0))
@@ -1964,10 +2032,8 @@ class App(ctk.CTk):
         ctk.CTkLabel(win, text="Comment (optional)", text_color=MUTED, anchor="w").pack(fill="x", padx=22, pady=(16, 0))
         box = ctk.CTkTextbox(win, fg_color=CARD, border_color=LINE, border_width=1, text_color=TEXT, wrap="word",
                              font=("Segoe UI", 12), corner_radius=8)
-        box.pack(fill="both", expand=True, padx=22, pady=(4, 10))
+        box.pack(fill="both", expand=True, padx=22, pady=(4, 0))
         box.insert("1.0", cur.get("note") or "")
-        row2 = ctk.CTkFrame(win, fg_color="transparent")
-        row2.pack(fill="x", padx=22, pady=(0, 16))
 
         def save():
             DB["ratings"][pkey(m)] = {"m": {k: m.get(k, "") for k in ("source", "url", "title", "cover")},
@@ -2504,19 +2570,22 @@ class App(ctk.CTk):
         ctk.CTkLabel(r, text="paper texture behind the pages and the menu", text_color=MUTED,
                      font=("Segoe UI", 11)).pack(side="left", padx=10)
         r = row(f)
-        self.sw_arrows = ctk.CTkSwitch(r, text="Show the reading-direction arrow at the start of a chapter",
-                                       progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
-                                       command=lambda: self.setv("show_arrows", bool(self.sw_arrows.get())))
-        self.sw_arrows.pack(side="left")
-        if S("show_arrows"):
-            self.sw_arrows.select()
-        r = row(f)
         self.sw_guides = ctk.CTkSwitch(r, text="In paged modes: black page borders, page numbers and the double-page gutter",
                                        progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
                                        command=lambda: self.setv("paged_guides", bool(self.sw_guides.get())))
         self.sw_guides.pack(side="left")
         if S("paged_guides"):
             self.sw_guides.select()
+        ctk.CTkFrame(f, height=8, fg_color="transparent").pack()
+
+        f = card("Sidebar")
+        r = row(f)
+        self.sw_hist = ctk.CTkSwitch(r, text="Show the History section (everything you have read)",
+                                     progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
+                                     command=lambda: self.set_history_visible(bool(self.sw_hist.get())))
+        self.sw_hist.pack(side="left")
+        if S("show_history"):
+            self.sw_hist.select()
         ctk.CTkFrame(f, height=8, fg_color="transparent").pack()
 
         f = card("Downloads (saved as one .cbz per chapter)")
@@ -2675,20 +2744,17 @@ class App(ctk.CTk):
         self.update_repo_list()
 
     def apply_paper(self, name):
-        """Switch the background: adopt its palette, repaint the sidebar and the open reader."""
+        """Switch the background theme: adopt the palette, then rebuild the window.
+
+        Recolouring the live widget tree in place (the old retint pass) kept leaving pieces
+        of the window behind on the previous palette - scroll areas and menus worst of all.
+        Recreating the widgets is instant and cannot half-apply.
+        """
+        if name == S("paper"):
+            return
         self.setv("paper", name)
-        retint(self, theme_pick(name))
-        self.configure(fg_color=BG)
-        style_ttk()
-        self.paint_side()
-        try:
-            self.refresh_settings()
-        except Exception:
-            pass
-        r = self.reader
-        if self.cur == "Reader" and r and r.get("urls") and not r.get("err"):
-            r["restore"] = r.get("page", 0)
-            self.build_body()
+        theme_pick(name)
+        self.after(10, self.rebuild_ui)     # let the option-menu callback return before we destroy it
 
     def reload_sources(self):
         rebuild_sources()
@@ -2781,25 +2847,6 @@ class App(ctk.CTk):
             self.rand_i -= 1
             self.rand_open(self.rand_hist[self.rand_i])
 
-    # ----- lofi radio -----
-    def lofi_toggle(self):
-        if LOFI.state in ("on", "connecting"):
-            LOFI.stop()
-        elif not LOFI.start():
-            messagebox.showinfo("Lofi radio", "Lofi radio needs the 'miniaudio' package.\n\n"
-                                "Run:   pip install miniaudio\n(and rebuild the exe if you use the packaged version)")
-
-    def lofi_refresh(self):
-        try:
-            st = LOFI.state
-            label = {"off": "\u266b  Lofi radio: off", "connecting": "\u266b  Connecting\u2026",
-                     "on": "\u266b  Lofi radio: on", "error": "\u266b  No stream \u2013 retry"}[st]
-            self.side.itemconfigure(self._lofi_txt, text=label, fill=SILVER_HI if st == "on" else MUTED)
-            self.side.itemconfigure(self._lofi_sub, text=LOFI.name[:32] if st == "on" else "")
-            self.side.itemconfigure(self._lofi_skip, state="normal" if st == "on" else "hidden")
-        except Exception:
-            pass
-
     def build_details(self):
         v = self.views["Details"]
         bar = ctk.CTkFrame(v, fg_color="transparent")
@@ -2827,7 +2874,7 @@ class App(ctk.CTk):
         self.d_dl.pack(side="left")
         self.d_rate = btn(row, "★ Rate", lambda: self.cur_detail and self.rate_manga(self.cur_detail[0]), width=110)
         self.d_rate.pack(side="left", padx=8)
-        self.d_desc = ctk.CTkLabel(right, text="", wraplength=760, justify="left", anchor="nw", text_color="#b4b9c2", font=("Segoe UI", 12))
+        self.d_desc = ctk.CTkLabel(right, text="", wraplength=760, justify="left", anchor="nw", text_color=MUTED, font=("Segoe UI", 12))
         self.d_desc.pack(fill="x", pady=(12, 0))
         self.d_more = ctk.CTkLabel(right, text="", text_color=SILVER, cursor="hand2", anchor="w")
         self.d_more.pack(fill="x")
@@ -3094,9 +3141,12 @@ class App(ctk.CTk):
         return "★ Bookmarked" if self.find_bm(m) else "☆ Bookmark"
 
     def toggle_bm(self):
-        if not self.cur_detail:
+        if self.cur_detail:
+            self.toggle_bm_m(self.cur_detail[0])
+
+    def toggle_bm_m(self, m):
+        if not m:
             return
-        m = self.cur_detail[0]
         ex = self.find_bm(m)
         if ex:
             DB["bookmarks"].remove(ex)
@@ -3104,6 +3154,10 @@ class App(ctk.CTk):
             DB["bookmarks"].append({**{k: m[k] for k in ("source", "url", "title", "cover")}, "folder": ""})
         save_db()
         self.d_bm.configure(text=self.bm_text(m))
+        try:
+            self.r_bm.configure(text=self.bm_text(m))
+        except Exception:
+            pass
 
     # ----- reader -----
     def build_reader(self):
@@ -3113,12 +3167,16 @@ class App(ctk.CTk):
         btn(bar, "← Back", self.reader_back, width=76).pack(side="left", padx=(12, 8), pady=10)
         self.r_title = ctk.CTkLabel(bar, text="", font=("Segoe UI", 13, "bold"), text_color=TEXT)
         self.r_title.pack(side="left", padx=8)
+        self.r_bm = btn(bar, "☆ Bookmark", lambda: self.toggle_bm_m(self.reader["m"] if self.reader else None), width=118)
+        self.r_bm.pack(side="left", padx=(2, 8))
         self.r_page = ctk.CTkLabel(bar, text="", text_color=MUTED)
         self.r_page.pack(side="left", padx=8)
         self.r_next = btn(bar, "Next ▶", lambda: self.chapter_step(1), primary=True, width=76)
         self.r_next.pack(side="right", padx=(6, 12))
         self.r_prev = btn(bar, "◀ Prev", lambda: self.chapter_step(-1), width=76)
         self.r_prev.pack(side="right")
+        self.r_chs = btn(bar, "▼  Chapters", self.chs_menu_open, width=150)
+        self.r_chs.pack(side="right", padx=8)
         btn(bar, "+", lambda: self.zoom_by(1), width=34).pack(side="right", padx=(6, 12))
         self.r_zoom = ctk.CTkLabel(bar, text="100%", text_color=SILVER, width=48)
         self.r_zoom.pack(side="right")
@@ -3170,7 +3228,9 @@ class App(ctk.CTk):
         ch = chs[idx]
         p = DB["progress"].setdefault(pkey(m), {"read": []})
         page = 0 if restart else (p.get("page", 0) if p.get("chapter") == ch["url"] else 0)
-        p.update(chapter=ch["url"], title=ch["title"], page=page)
+        p.update(chapter=ch["url"], title=ch["title"], page=page,
+                 ts=time.time(),          # drives the Continue shelf ordering
+                 manga={k: m[k] for k in ("source", "url", "title", "cover")})
         DB["last"] = {"manga": {k: m[k] for k in ("source", "url", "title", "cover")}, "key": pkey(m)}
         save_db()
         self.rtok += 1
@@ -3185,6 +3245,17 @@ class App(ctk.CTk):
         self.r_title.configure(text=f'{m["title"][:34]}  ·  {ch["title"][:30]}')
         self.r_prev.configure(state="normal" if idx > 0 else "disabled")
         self.r_next.configure(state="normal" if idx + 1 < len(chs) else "disabled")
+        self.r_bm.configure(text=self.bm_text(m))
+        labels, by_label = [], {}
+        for i, c2 in enumerate(chs):
+            t2 = (c2.get("title") or "").strip()
+            lab = f"{i + 1}: {t2[:26]}" if t2 else f"Chapter {i + 1}"
+            if lab in by_label:          # duplicate chapter titles stay unique for the menu
+                lab = f"{lab}  ({i + 1})"
+            labels.append(lab)
+            by_label[lab] = i
+        self._ch_labels, self._ch_map = labels, by_label
+        self.r_chs.configure(text="\u25bc  " + labels[idx])
         self.r_mode.set(mode)
         self.r_zoom.configure(text="100%")
         self.r_page.configure(text="")
@@ -3197,13 +3268,83 @@ class App(ctk.CTk):
         self.reader["urls"] = urls or []
         self.reader["err"] = str(err)[:120] if err else None
         self.build_body()
-        if self.reader["urls"] and not self.reader["err"]:
-            self.show_hint()
 
     def chapter_step(self, d):
         r = self.reader
         if r and 0 <= r["idx"] + d < len(r["chs"]):
             self.open_chapter(r["m"], r["chs"], r["idx"] + d, nxt=d > 0)
+
+    def reader_ch_jump(self, label):
+        """Chapter dropdown in the reader bar: jump straight to the picked chapter."""
+        r, idx = self.reader, self._ch_map.get(label)
+        if r is None or idx is None or idx == r["idx"]:
+            return
+        self.open_chapter(r["m"], r["chs"], idx, nxt=idx > r["idx"])
+
+    def _chs_pick(self, lab, win):
+        try:
+            win.destroy()
+        except Exception:
+            pass
+        self.reader_ch_jump(lab)
+
+    def chs_menu_open(self):
+        """Scrollable chapter list under the reader-bar button.
+
+        A header strip sits where the cursor is when the popup opens, so the release
+        half of the opening click cannot fall through onto a chapter row."""
+        labels = getattr(self, "_ch_labels", [])
+        r = self.reader
+        if not labels or r is None:
+            return
+        cur = r["idx"]
+        win = tk.Toplevel(self)
+        win.overrideredirect(True)
+        try:
+            win.configure(bg=LINE)
+        except Exception:
+            pass
+        panel = ctk.CTkFrame(win, fg_color=PANEL, corner_radius=8, border_width=1, border_color=LINE)
+        panel.pack(fill="both", expand=True, padx=1, pady=1)
+        # header doubles as a click-dead zone: it swallows the release, no chapter fires
+        ctk.CTkLabel(panel, text="Jump to chapter · scroll with the mouse wheel", height=32,
+                     font=("Segoe UI", 11, "bold"), text_color=MUTED, fg_color=CARD,
+                     corner_radius=0).pack(fill="x", padx=(2, 2), pady=(2, 4))
+        rows = ctk.CTkScrollableFrame(panel, width=320, height=300, fg_color=PANEL)
+        rows.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        for i, lab in enumerate(labels):
+            row = ctk.CTkButton(rows,
+                                text=("\u25cf   " if i == cur else "      ") + lab,
+                                anchor="w", height=30, corner_radius=6, font=("Segoe UI", 11),
+                                fg_color=BTN_HI if i == cur else BTN,
+                                hover_color=BTN_HI,
+                                text_color=SILVER_HI if i == cur else TEXT,
+                                command=lambda l=lab, w=win: self._chs_pick(l, w))
+            row.pack(fill="x", padx=2, pady=1)
+        w = 360
+        hpx = min(len(labels) * 34 + 110, 520)
+        x = max(self.r_chs.winfo_rootx() - 180, 8)
+        y = self.r_chs.winfo_rooty() + self.r_chs.winfo_height() + 4
+        win.geometry(f"{w}x{hpx}+{x}+{y}")
+        win.lift()
+        win.grab_set()
+        # auto-scroll so the current chapter is in view, not chapter 1 of a 167-chapter list
+        try:
+            frac = cur / max(1, len(labels) - 1)
+            rows._parent_canvas.yview_moveto(max(0.0, min(1.0, frac - 0.25)))
+        except Exception:
+            pass
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        def outside(e):
+            px, py, pw, ph = win.winfo_rootx(), win.winfo_rooty(), win.winfo_width(), win.winfo_height()
+            if not (px <= e.x_root < px + pw and py <= e.y_root < py + ph):
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+        win.bind("<Button-1>", outside)
+        self._chs_open = win
 
     def reader_back(self):
         self.show("Details")
@@ -3221,38 +3362,6 @@ class App(ctk.CTk):
             r["restore"] = r["page"]
         r["pan"] = [0, 0]
         self.build_body()
-        if r["urls"] and not r["err"]:
-            self.show_hint()
-
-    def hint_text(self):
-        if self.is_web():
-            return ARROWS["webtoon"]
-        return ARROWS["rtl"] if self.is_rtl() else ARROWS["ltr"]
-
-    def show_hint(self):
-        """Little reading-direction badge; fades away 5s after a chapter opens or the mode changes."""
-        if not S("show_arrows") or not self.reader or self.reader.get("urls") is None:
-            return
-        old = getattr(self, "_hint", None)
-        if old is not None:
-            try:
-                old.destroy()
-            except Exception:
-                pass
-        try:
-            lbl = ctk.CTkLabel(self.rbody, text=self.hint_text(), fg_color="#10131a", text_color=SILVER_HI,
-                               corner_radius=14, font=("Segoe UI", 14, "bold"), padx=16, pady=7)
-            lbl.place(relx=0.5, rely=0.94, anchor="s")
-            self._hint = lbl
-            self.after(5000, lambda l=lbl: self.drop_hint(l))
-        except Exception:
-            pass
-
-    def drop_hint(self, lbl):
-        try:
-            lbl.destroy()
-        except Exception:
-            pass
 
     def build_body(self):
         r = self.reader
@@ -3524,6 +3633,7 @@ class App(ctk.CTk):
                 if st[i] == 2 and (i < klo or i > khi):
                     c.itemconfigure(r["items"][i], image=ph)
                     c.itemconfigure(r["texts"][i], text=f"Page {i + 1}")
+                    self.wt_border(i, True)   # placeholder again, so the box is visible
                     r["photos"].pop(i, None)
                     st[i] = 0
         except Exception:
@@ -3570,7 +3680,20 @@ class App(ctk.CTk):
         r["photos"][i] = ph  # canvas items do not own their image - keep it alive here
         c.itemconfigure(r["items"][i], image=ph)
         c.itemconfigure(r["texts"][i], text="")
+        self.wt_border(i, False)     # artwork is on canvas: no artificial page border
         r["state"][i] = 2
+
+    def wt_border(self, i, show=True):
+        """Page-box outline: visible only for placeholders/failed pages, hidden once the
+        real artwork covers the box (the stacked outline edges at page junctions used to
+        read as a random black hairline across the middle of a long strip)."""
+        try:
+            r = self.reader
+            b = r.get("borders") or []
+            if r.get("c") is not None and 0 <= i < len(b):
+                r["c"].itemconfigure(b[i], state="normal" if show else "hidden")
+        except Exception:
+            pass
 
     def wt_fix_box(self, i, im):
         """The page turned out to have a different shape than the estimate - resize its box in place."""
@@ -3608,6 +3731,7 @@ class App(ctk.CTk):
         for i, it in enumerate(r["items"]):
             c.itemconfigure(it, image=ph)
             c.itemconfigure(r["texts"][i], text=f"Page {i + 1}")
+            self.wt_border(i, True)
         r["photos"].clear()
         r["state"] = [0 if s in (1, 2) else s for s in r["state"]]
         r["tries"] = [0] * len(r["state"])
@@ -3812,7 +3936,13 @@ class App(ctk.CTk):
             r["pan"] = [0, 0]
             self.pg_render()
 
+    def _listbox_open(self):
+        w = getattr(self, "_chs_open", None)
+        return bool(w and w.winfo_exists())
+
     def on_wheel(self, e):
+        if self._listbox_open():
+            return
         r = self.reader
         if self.cur != "Reader" or not r or "c" not in r:
             return
@@ -3830,6 +3960,10 @@ class App(ctk.CTk):
             self.pg_step(1 if e.delta < 0 else -1)
 
     def on_key(self, e):
+        if self._listbox_open():
+            if e.keysym == "Escape":
+                self._chs_open.destroy()
+            return
         r = self.reader
         if self.cur != "Reader" or not r or "c" not in r:
             return
