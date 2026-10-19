@@ -1,21 +1,33 @@
-MIT License
+Sablja Reader - Proprietary License
+Copyright (c) 2026 Poznanovic. All rights reserved.
 
-Copyright (c) 2026 Sablja Reader
+THIS SOFTWARE IS NOT OPEN SOURCE.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this
+software and its source code, to install and use it for personal, non-commercial
+purposes only, subject to the conditions below.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+You may NOT:
+  1. sell, resell, rent, lease, sublicense or otherwise charge money for this
+     software or for access to it;
+  2. redistribute, publish, mirror, bundle or share this software (in original or
+     modified form) with anyone, whether on a website, app store, package
+     repository, download page or by any other means;
+  3. modify, translate, reverse engineer or create derivative works from this
+     software, or distribute any part of its source code;
+  4. remove or alter this notice, the author's name, or any copyright or
+     attribution displayed in the software or its About/credits.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Any use outside the permission granted above requires the prior written consent of
+the copyright holder.
+
+This software is provided "AS IS", without warranty of any kind, express or implied,
+including but not limited to the warranties of merchantability, fitness for a
+particular purpose and noninfringement. In no event shall the author or copyright
+holder be liable for any claim, damages or other liability, whether in an action of
+contract, tort or otherwise, arising from, out of or in connection with the software
+or the use or other dealings in the software.
+
+The software is a client for third-party websites; it hosts no content and no
+material belongs to the author. All rights to the displayed content remain with its
+respective owners.

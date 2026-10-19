@@ -7,7 +7,6 @@
 #
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
-python -m pip install --quiet miniaudio
 
 python -m PyInstaller --noconfirm SabljaReader.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit $LASTEXITCODE)" }

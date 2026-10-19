@@ -1,8 +1,9 @@
 # Sablja Reader
 
-A desktop manga / manhwa / webtoon reader for Windows. Silver-on-graphite UI, webtoon (vertical strip),
-single, double and right-to-left paged reading, a library with folders and bookmarks, downloads and
-progress tracking — plus a built-in random manga roll (Randomizer) and a lofi radio for reading in the background.
+A desktop manga / manhwa / webtoon reader for Windows. Silver-on-graphite UI with a warm
+*Paper* theme in **Settings → Background**, webtoon (vertical strip),
+single, double and right-to-left paged reading, a library with folders and bookmarks, downloads,
+a History section and progress tracking — plus a built-in random manga roll (Randomizer).
 
 **It hosts no content.** It is a client: it reads publicly available pages from third-party sources listed
 in `sources.json`, using the official API where one exists and plain server-rendered HTML otherwise.
@@ -48,9 +49,8 @@ pip install -r requirements.txt
 python SabljaReader.py
 ```
 
-`curl_cffi` (Chrome/Firefox TLS fingerprint, bypasses many 403s on Cloudflare-protected pages) and
-`miniaudio` (the lofi radio) are included in `requirements.txt`; the app also runs without them —
-you just lose those extras.
+`curl_cffi` (Chrome/Firefox TLS fingerprint, bypasses many 403s on Cloudflare-protected pages) is
+included in `requirements.txt`; the app also runs without it — you just lose that extra.
 
 ---
 
@@ -60,8 +60,8 @@ you just lose those extras.
 .\build.ps1
 ```
 
-This produces a single-file `dist\SabljaReader.exe` (with the app icon baked in and the lofi radio
-working — `miniaudio` is pinned in `SabljaReader.spec`) and copies `sources.json` next to it.
+This produces a single-file `dist\SabljaReader.exe` (with the app icon baked in) and copies
+`sources.json` next to it.
 Your library, progress and cache in `dist\data` are left untouched.
 
 ---
@@ -90,12 +90,12 @@ details page, so you can read, bookmark, rate or download it. *Next random* roll
 *Previous* steps back through the ones you've seen — an easy way to find something new
 without searching.
 
-### Lofi radio
+### History
 
-The toggle at the bottom of the sidebar starts the **lofi radio** (⏭ skips to another station).
-Stations come from the free [radio-browser.info](https://www.radio-browser.info) directory
-(tag `lofi`, MP3), with SomaFM Groove Salad as a fallback. Nothing to pre-install — in both the
-packaged exe and a source run with `requirements.txt`, the audio engine (`miniaudio`) is already there.
+The **History** section lists everything you have read, newest first, with the chapter and page you
+stopped on — click a card to jump straight back in, right-click to remove a single entry, or use
+*Clear history* for all of it. Don't want it in the sidebar? Turn it off in *Settings → Sidebar*
+(*Show the History section*); your reading positions are kept either way.
 
 ### Downloads
 
@@ -124,9 +124,11 @@ argument or run it empty and type it in.
 * Windows 10/11, 64-bit.
 * Memory: only pages near the viewport are held in memory; tall strips are capped in resolution
   (`WT_MAX_PX`) so a long chapter cannot grow without bound.
-* The lofi radio needs the radio-browser.info directory (a free volunteer service); if it is briefly
-  down, the app falls back to SomaFM and shows *No stream – retry* until a station connects.
+* Webtoon pages show a page-box outline only while a page is loading or failed; once artwork is on
+  the canvas the outline is hidden, so long strips butt together seamlessly (no stray hairlines).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Proprietary — all rights reserved. Free to install and use for personal, non-commercial
+purposes; selling, redistributing or republishing the app (or its source) is not allowed.
+See [LICENSE](LICENSE).
