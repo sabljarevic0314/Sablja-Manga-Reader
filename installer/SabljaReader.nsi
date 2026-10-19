@@ -41,7 +41,7 @@ Section "Sablja Reader" SecMain
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKCU "Software\SabljaReader" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayName" "Sablja Reader"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayVersion" "1.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayVersion" "1.2"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "Publisher" "Sablja Reader"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayIcon" "$INSTDIR\SabljaReader.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "InstallLocation" "$INSTDIR"
