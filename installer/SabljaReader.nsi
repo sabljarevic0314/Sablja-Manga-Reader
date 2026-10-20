@@ -8,6 +8,15 @@ Unicode true
 !include "MUI2.nsh"
 
 Name "Sablja Reader"
+!define APP_VERSION "1.3.0"
+VIProductVersion "1.3.0.0"
+VIFileVersion "1.3.0.0"
+VIAddVersionKey "ProductName" "Sablja Reader"
+VIAddVersionKey "CompanyName" "Sablja Reader"
+VIAddVersionKey "FileDescription" "Sablja Reader Installer"
+VIAddVersionKey "FileVersion" "1.3.0.0"
+VIAddVersionKey "ProductVersion" "1.3.0.0"
+VIAddVersionKey "LegalCopyright" "Sablja Reader"
 OutFile "..\dist\SabljaReader-Setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\SabljaReader"
 InstallDirRegKey HKCU "Software\SabljaReader" "InstallDir"
@@ -41,14 +50,14 @@ Section "Sablja Reader" SecMain
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKCU "Software\SabljaReader" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayName" "Sablja Reader"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayVersion" "1.2"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayVersion" "1.3.0"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "Publisher" "Sablja Reader"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayIcon" "$INSTDIR\SabljaReader.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "NoRepair" 1
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "EstimatedSize" 24000
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "EstimatedSize" 26000
 
   CreateDirectory "$SMPROGRAMS\Sablja Reader"
   CreateShortCut "$SMPROGRAMS\Sablja Reader\Sablja Reader.lnk" "$INSTDIR\SabljaReader.exe"
