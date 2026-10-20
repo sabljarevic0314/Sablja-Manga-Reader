@@ -5,8 +5,11 @@ A desktop manga / manhwa / webtoon reader for Windows. Silver-on-graphite UI wit
 single, double and right-to-left paged reading, a library with folders and bookmarks, downloads,
 a History section and progress tracking — plus a built-in random manga roll (Randomizer).
 
-**It hosts no content.** It is a client: it reads publicly available pages from third-party sources listed
-in `sources.json`, using the official API where one exists and plain server-rendered HTML otherwise.
+**It hosts no content.** Sablja Reader is only a client application. It does not host, store,
+upload or distribute any manga, and it ships with no copyrighted material. It reads pages from
+the sources you enable in `sources.json`, using the official API where one exists (for example
+MangaDex and Webtoons). Which sources you enable, and what you read or download from them, is
+your decision and your responsibility — see [Legal notice](#legal-notice).
 
 ---
 
@@ -49,8 +52,8 @@ pip install -r requirements.txt
 python SabljaReader.py
 ```
 
-`curl_cffi` (Chrome/Firefox TLS fingerprint, bypasses many 403s on Cloudflare-protected pages) is
-included in `requirements.txt`; the app also runs without it — you just lose that extra.
+`curl_cffi` (a browser-compatible HTTP client) is included in `requirements.txt` as an optional
+extra; the app also runs without it.
 
 ---
 
@@ -99,23 +102,33 @@ stopped on — click a card to jump straight back in, right-click to remove a si
 
 ### Downloads
 
-Chapters are downloaded in the background from the details page (with a configurable delay between
-page fetches); downloaded chapters live in `<install folder>\data\downloads` and stay readable offline.
+Chapters can be saved for personal offline reading from the details page (with a configurable delay
+between page fetches, to keep the load on the source low); downloaded chapters live in
+`<install folder>\data\downloads`. Downloads are for your own personal use only — do not
+redistribute them.
 
 ---
 
 ## Sources
 
-`sources.json` is the one file to edit — add a source by describing its listing/search/details/chapter
+`sources.json` is the one file to edit — a source is described by its listing/search/details/chapter
 selectors (or `api: mangadex` / `api: webtoons` for the official APIs). The app hot-reloads it
 (*Settings → Reload sources.json*).
 
-Some sources need cookies (Cloudflare-protected sites). Put them in
-*Settings → Cloudflare-protected sources*; they are stored per source in `data\db.json`.
+**Sablja Reader does not endorse, operate or recommend any particular source.** The sources included
+with the app are limited to official public APIs. If you add other sources yourself, you are
+responsible for making sure you are allowed to access and read them: check the site's terms of
+service and the copyright status of what it offers, and prefer sources that are published with the
+rights holders' permission. Please keep your request rate low and respect `robots.txt` and any
+access restrictions a site applies.
+
+Some sources may ask you to sign in or supply cookies from your own browser session. Settings for
+this are in *Settings → Protected sources*; they are stored per source in `data\db.json` on your
+own computer and are never sent anywhere except to that source.
 
 Adding a source from scratch? `autoprobe.py` does a one-shot probe of a listing page and writes
 `autoprobe_<host>.txt` with the card / chapter / page selectors it detected - paste the URL as an
-argument or run it empty and type it in.
+argument or run it empty and type it in. Only use it on sites you are permitted to access.
 
 ---
 
@@ -126,6 +139,20 @@ argument or run it empty and type it in.
   (`WT_MAX_PX`) so a long chapter cannot grow without bound.
 * Webtoon pages show a page-box outline only while a page is loading or failed; once artwork is on
   the canvas the outline is hidden, so long strips butt together seamlessly (no stray hairlines).
+
+---
+
+## Legal notice
+
+* Sablja Reader is an independent hobby project. It is not affiliated with, endorsed by or
+  sponsored by any manga publisher, scanlation group, website or API provider mentioned or used
+  by it. All trademarks and content belong to their respective owners.
+* The software is provided **"as is"**, without warranty of any kind. You use it at your own risk.
+* You are solely responsible for the sources you enable and the content you view or download,
+  and for complying with the laws of your country and the terms of the sites you visit.
+* If you are a rights holder and believe this repository or its release files infringe your
+  rights, please open an issue on this repository or contact the owner through their GitHub
+  profile, and the matter will be looked at promptly.
 
 ## License
 
