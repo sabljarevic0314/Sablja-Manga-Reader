@@ -1,5 +1,7 @@
-import os, sys, json, re, time, hashlib, threading, queue, shutil, zipfile, random, html, io, math, base64
-from urllib.parse import urljoin, quote_plus
+import os, sys, json, re, time, hashlib, threading, queue, shutil, zipfile, random, html, io, math, base64, platform, webbrowser, traceback
+from collections import OrderedDict
+from typing import Any, cast
+from urllib.parse import urljoin, quote_plus, urlencode, urlsplit
 from concurrent.futures import ThreadPoolExecutor
 import requests
 from bs4 import BeautifulSoup
@@ -19,9 +21,16 @@ CACHE = os.path.join(DATA, "cache")
 DB_FILE = os.path.join(DATA, "db.json")
 SRC_FILE = os.path.join(BASE, "sources.json")
 os.makedirs(CACHE, exist_ok=True)
-UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"}
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9"}
 IMG_ATTRS = ["data-src", "lazy-src", "data-original", "data-lazy-src", "src"]
 PAGE_SIZE = 32
+# Card sizes (logical px). Bigger covers = fewer widgets on screen = smoother scrolling.
+CARD_W, CARD_H = 212, 300
+SMALL_W, SMALL_H = 128, 181          # search-result cards
+CARD_CELL = CARD_W + 24              # card + frame margin + 2*6 grid padding
+SMALL_CELL = SMALL_W + 24
 MD_API = "https://api.mangadex.org"
 
 # ---------------- theme (silver on graphite) ----------------
@@ -66,7 +75,11 @@ PAGE_GAP = 16       # black gutter between the two halves of a double spread
 DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
             "dl_dir": os.path.join(BASE, "downloads"), "nsfw": True,
             "paged_guides": True, "paper": "Graphite matte",
-            "show_history": True}
+            "reader_paper": "Graphite matte",
+            "show_history": True, "start_fullscreen": True, "card_genres": True}
+
+APP_VERSION = "1.3.0"
+REPO_URL = "https://github.com/sabljarevic0314/Sablja-Manga-Reader"
 
 DL_VIEW_CHIP = "__downloaded__"
 
@@ -450,16 +463,17 @@ LOGO_B64 = (
     "eIPeUoO/uPMbMFqiNKXzStonAzs4U7ezX13QLKXt9HdNgWosJp6Q4bUM46ZtGl/6X0FG2Z7la9mT+n/5fewN9BoyOttconESuP4/D/ATIFQD/n"
     "8O+qAAAAAElFTkSuQmCC"
 )
-_LOGO = [None]
+_LOGO: list[Image.Image | None] = [None]
 
 
 def make_icon(size=256):
     """App logo (the crossed-sabres SR badge); falls back to the old drawn logo if decoding fails."""
     try:
-        if _LOGO[0] is None:
-            _LOGO[0] = Image.open(io.BytesIO(base64.b64decode("".join(LOGO_B64)))).convert("RGBA")
         im = _LOGO[0]
-        return im.copy() if size == im.width else im.resize((size, size), Image.LANCZOS)
+        if im is None:
+            im = Image.open(io.BytesIO(base64.b64decode("".join(LOGO_B64)))).convert("RGBA")
+            _LOGO[0] = im
+        return im.copy() if size == im.width else im.resize((size, size), Image.Resampling.LANCZOS)
     except Exception:
         return _make_icon_old(size)
 
@@ -507,7 +521,9 @@ def _make_icon_old(size=256):
 
 # ---------------- paper / book-cloth textures ----------------
 # Everything here is generated, so the app stays a single self-contained .exe.
-_TEX_PIL, _TEX_TK, _TEX_AVG = {}, {}, {}
+_TEX_PIL: dict[tuple[str, int], Image.Image] = {}
+_TEX_TK: dict[tuple[str, int], ImageTk.PhotoImage] = {}
+_TEX_AVG: dict[str, str] = {}
 TEX = 512           # tile edge; big enough that the repeat is not readable
 
 
@@ -576,7 +592,7 @@ def paper_pil(name, size=TEX):
         return None
     key = (name, size)
     if key not in _TEX_PIL:
-        make = {"matte": _matte, "cloth": _cloth}.get(PAPER_KIND.get(name), _matte)
+        make = {"matte": _matte, "cloth": _cloth}.get(PAPER_KIND.get(name, "matte"), _matte)
         _TEX_PIL[key] = make(PAPER_RGB[name], size, 20260 + sum(PAPER_RGB[name]) + len(name) * 7)
     return _TEX_PIL[key]
 
@@ -597,7 +613,7 @@ def paper_avg(name):
     if tile is None:
         return None
     if name not in _TEX_AVG:
-        px = list(tile.resize((16, 16), Image.LANCZOS).getdata())
+        px = list(cast(Any, tile.resize((16, 16), Image.Resampling.LANCZOS).getdata()))
         kn = len(px)
         _TEX_AVG[name] = "#%02x%02x%02x" % tuple(sum(c[i] for c in px) // kn for i in range(3))
     return _TEX_AVG[name]
@@ -626,18 +642,23 @@ def make_icon_file(path):
 
 
 # ---------------- storage ----------------
-def load_db():
+def load_db() -> dict[str, Any]:
     try:
         with open(DB_FILE, encoding="utf-8") as f:
             db = json.load(f)
     except Exception:
         db = {}
-    for k, v in dict(bookmarks=[], progress={}, last=None, folders=[], set={}, downloads=[], ratings={}).items():
+    for k, v in dict(bookmarks=[], progress={}, last=None, folders=[], set={}, downloads=[], ratings={},
+                     meta={}).items():
         db.setdefault(k, v)
+    if isinstance(db.get("set"), dict):
+        db["set"].pop("headers", None)  # old per-source cookie/User-Agent overrides (feature removed)
+    if not isinstance(db.get("meta"), dict):
+        db["meta"] = {}
     return db
 
 
-DB = load_db()
+DB: dict[str, Any] = load_db()
 
 
 def save_db():
@@ -645,17 +666,57 @@ def save_db():
         json.dump(DB, f, indent=1, ensure_ascii=False)
 
 
-def S(k):
+def reader_muted():
+    """Muted text for overlay labels on the reader's own background."""
+    return "#6f6a5d" if S("reader_paper") in LIGHT_PAPERS else "#9aa0ab"
+
+
+def S(k) -> Any:
     v = DB["set"].get(k, DEFAULTS[k])
     if v == "Paper white":                 # renamed in 1.2 while it was still an experiment
         v = "Paper"
-    if k == "paper" and v not in PAPERS:   # older builds saved "Grey paper"/"Dark blue paper"
-        v = DEFAULTS["paper"]
+    if k in ("paper", "reader_paper") and v not in PAPERS:  # older builds saved invalid names
+        v = DEFAULTS[k]
     return v
 
 
 def pkey(m):
     return f'{m["source"]}|{m["url"]}'
+
+
+def cached_genres(m):
+    """Genres we already learned for this manga (from a listing or its details page)."""
+    if not m.get("url"):
+        return []
+    e = (DB.get("meta") or {}).get(pkey(m))
+    gs = e.get("genres") if isinstance(e, dict) else (e if isinstance(e, list) else [])
+    return [str(g).strip() for g in (gs or []) if str(g).strip()]
+
+
+def remember_genres(m, genres):
+    """Cache genres in db.json so cards get labels without fetching the details page again."""
+    if not m.get("url"):
+        return
+    gs = []
+    for g in genres or []:
+        g = re.sub(r"^#+\s*", "", str(g)).strip()
+        if g and g not in gs:
+            gs.append(g)
+    if not gs or cached_genres(m) == gs[:20]:
+        return
+    DB.setdefault("meta", {})[pkey(m)] = {"genres": gs[:20]}
+    save_db()
+
+
+def genre_text(genres, limit=2):
+    """Compact label for a card: 'Action · Fantasy +3'."""
+    gs = [str(g).strip() for g in (genres or []) if str(g).strip()]
+    if not gs:
+        return ""
+    s = " · ".join(gs[:limit])
+    if len(gs) > limit:
+        s += f" +{len(gs) - limit}"
+    return s
 
 
 def safe(s):
@@ -845,8 +906,15 @@ def pick(el, sel):
 
 def txt(el):
     if el is not None and el.name == "meta":
-        return (el.get("content") or "").strip()
+        return str(el.get("content") or "").strip()
     return el.get_text(" ", strip=True) if el else ""
+
+
+def own_text(el):
+    """Only the element's own text nodes (skips <small>, <a class=label>, … children)."""
+    if el is None:
+        return ""
+    return " ".join(str(x).strip() for x in el.find_all(string=True, recursive=False)).strip()
 
 
 def attr(el, names):
@@ -867,6 +935,29 @@ def href(el):
     return el.get("href") or (el.find("a").get("href") if el.find("a") else "") or ""
 
 
+def _js_token(n, a):
+    """The 'e(c)' token generator from Dean Edwards' JS packer, in Python."""
+    if n >= a:
+        return _js_token(n // a, a) + _js_token(n % a, a)
+    return chr(n + 29) if n > 35 else "0123456789abcdefghijklmnopqrstuvwxyz"[n]
+
+
+def _js_unpack(text):
+    """Unpack the eval(function(p,a,c,k,e,d){…}) payload FanFox's chapter AJAX returns.
+
+    Returns the text unchanged when it is not packed, so callers can just regex the result.
+    """
+    m = re.search(r"\}\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'", text or "", re.S)
+    if not m:
+        return text or ""
+    p, a, c, k = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4).split("|")
+    p = p.replace("\\'", "'").replace("\\\\", "\\")
+    for i in range(c - 1, -1, -1):
+        if i < len(k) and k[i]:
+            p = re.sub(r"\b" + re.escape(_js_token(i, a)) + r"\b", lambda _m, v=k[i]: v, p)
+    return p
+
+
 class Source:
     def __init__(self, d):
         self.d, self.id, self.name = d, d["id"], d["name"]
@@ -875,6 +966,11 @@ class Source:
         self.nsfw = bool(d.get("nsfw"))
         self._tl = threading.local()
         self._genres = None
+        # Per-host request pacing. A handful of cover lookups used to fire dozens of
+        # requests at once and some sites answered with HTTP 429; this keeps a polite
+        # gap between requests to the same host without slowing down CDN images.
+        self._rl_lock = threading.Lock()
+        self._rl: dict[str, tuple[float, float]] = {}
 
     # ---- http ----
     def _session(self):
@@ -884,15 +980,65 @@ class Source:
             self._tl.s = s
         return s
 
+    @staticmethod
+    def _host(url):
+        try:
+            return urlsplit(url).netloc.lower()
+        except Exception:
+            return ""
+
+    def _throttle(self, host, gap):
+        with self._rl_lock:
+            nxt, cool = self._rl.get(host, (0.0, 0.0))
+            now = time.monotonic()
+            wait = max(nxt, cool) - now
+            self._rl[host] = (max(now, nxt) + gap, cool)
+        if wait > 0:
+            time.sleep(min(wait, 15.0))
+
+    def _cool(self, host, seconds):
+        with self._rl_lock:
+            nxt, cool = self._rl.get(host, (0.0, 0.0))
+            self._rl[host] = (nxt, max(cool, time.monotonic() + seconds))
+
     def get(self, url, referer=None):
         h = dict(UA)
         h["Referer"] = referer or (self.base + "/")
         h.update(self.d.get("headers", {}))
-        # per-source overrides saved in Settings (User-Agent / Cookie) - used for Cloudflare sites
-        h.update((DB["set"].get("headers") or {}).get(self.id) or {})
-        r = self._session().get(url, headers=h, timeout=25)
-        r.raise_for_status()
-        return r
+        host, last = self._host(url), None
+        image = bool(re.search(r"\.(?:jpe?g|png|webp|gif|avif)(?:\?|$)", url, re.I))
+        gap = 0.02 if image else float(self.d.get("request_delay", 0.05))
+        for attempt in range(3):
+            self._throttle(host, gap)
+            try:
+                r = self._session().get(url, headers=h, timeout=25)
+            except Exception as e:
+                last = e
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
+            if r.status_code == 429:
+                # Honour Retry-After when the site sends one, but never stall a
+                # worker for minutes. Other requests to the same host wait too.
+                try:
+                    wait = float(r.headers.get("Retry-After") or 0)
+                except Exception:
+                    wait = 0.0
+                wait = max(wait, 2.0 * (attempt + 1))
+                self._cool(host, wait)
+                last = requests.HTTPError(f"429 Too Many Requests from {host}", response=r)
+                if attempt < 2:
+                    time.sleep(min(wait, 8.0))
+                    continue
+            elif r.status_code in (500, 502, 503, 504) and attempt < 2:
+                last = requests.HTTPError(f"{r.status_code} from {host}", response=r)
+                time.sleep(0.6 * (attempt + 1))
+                continue
+            r.raise_for_status()
+            return r
+        raise last or RuntimeError("request failed")
+
 
     def soup(self, url):
         return BeautifulSoup(self.get(url).text, "html.parser")
@@ -902,7 +1048,9 @@ class Source:
 
     # ---- capabilities ----
     def kinds(self):
-        return ["popular", "latest"] if self.api else [k for k in ("popular", "latest") if k in self.d]
+        if self.api in ("mangadex", "webtoons"):
+            return ["popular", "latest"]
+        return [k for k in ("popular", "latest") if k in self.d]
 
     def can_search(self):
         return bool(self.api) or "search" in self.d
@@ -921,6 +1069,30 @@ class Source:
                     ("Originals", "originals"), ("Canvas", "canvas")]
         return [tuple(g) for g in self.d.get("genres", [])] if "genre" in self.d else []
 
+    def _tag_list(self, scope, sels=None):
+        """First selector group that yields text becomes the genre/category list.
+
+        sources.json `tags` entries are selectors for the details page; a listing can also
+        carry its own `tags` selectors when the card itself shows genres.
+        """
+        if sels is None:
+            sels = self.d.get("tags") or []
+        if isinstance(sels, str):
+            sels = [sels]
+        for sel in sels:
+            out = []
+            try:
+                els = scope.select(sel)
+            except Exception:
+                continue
+            for e in els:
+                t = re.sub(r"^#+\s*", "", txt(e)).strip()
+                if t and t not in out:
+                    out.append(t)
+            if out:
+                return out[:20]
+        return []
+
     # ---- listing ----
     def listing(self, kind, page=1, query="", genre=""):
         if self.api == "mangadex":
@@ -936,17 +1108,33 @@ class Source:
         if c.get("single_page") and page > 1:
             return []
         url = self.abs(c["url"].format(page=page, query=quote_plus(query), offset=(page - 1) * PAGE_SIZE, genre=genre))
+        ck = (self.id, key, page, query, genre, url)
+        hit = listing_cache_get(ck)
+        if hit is not None:
+            return hit
         out, seen = [], set()
         for it in self.soup(url).select(c["item"]):
             t = pick(it, c.get("title"))
             link = pick(it, c.get("link") or c.get("title"))
-            title = txt(t) or (t.get("title", "") if t else "")
+            title = str(txt(t) or (t.get("title", "") if t else ""))
+            # Listing markup often appends a rank/volume badge inside the link. The
+            # link's title attribute is the clean name ("One Piece", not "One Piece 1").
+            if c.get("title_attr") and t is not None and t.get(c["title_attr"]):
+                title = str(t.get(c["title_attr"]))
+            elif title.endswith(("...", "…")) and t is not None and t.get("title"):
+                title = str(t.get("title"))
             u = self.abs(href(link))
             if not title or not u or u in seen:
                 continue
             seen.add(u)
             cover = self.abs(attr(pick(it, c.get("cover", "img")), c.get("cover_attr", IMG_ATTRS)))
-            out.append({"title": title, "url": u, "cover": cover, "source": self.id})
+            # Some sites emit a broken local cover path in list markup while the real
+            # image lives on their CDN. Rewrites keep card downloads from retrying 404s.
+            for pat, rep in c.get("cover_rewrite", []):
+                cover = re.sub(pat, rep, cover)
+            out.append({"title": title, "url": u, "cover": cover, "source": self.id,
+                        "genres": self._tag_list(it, c.get("tags"))})
+        listing_cache_put(ck, out)
         return out
 
     def _chapters(self, soup, c):
@@ -963,7 +1151,8 @@ class Source:
             if pat:
                 m = pat.search(t)
                 if m and m.group(1).strip():
-                    t = m.group(1).strip()
+                    vals = [m.group(0)] + [g.strip() if g else "" for g in m.groups()]
+                    t = c.get("title_format", "{1}").format(*vals)
             chs.append({"title": t, "url": u})
         return chs
 
@@ -975,24 +1164,36 @@ class Source:
         d, soup = self.d.get("details", {}), self.soup(url)
         sel = lambda k: soup.select_one(d[k]) if d.get(k) else None
         cover = self.abs(attr(sel("cover"), d.get("cover_attr", IMG_ATTRS))) if d.get("cover") else ""
+        title = own_text(sel("title")) if d.get("title_direct_text") else txt(sel("title"))
+        if d.get("title_pattern"):
+            mt = re.search(d["title_pattern"], title)
+            if mt and mt.group(1).strip():
+                title = mt.group(1).strip()
+        description = txt(sel("description"))
+        genres = self._tag_list(soup)
         c = self.d.get("chapters") or {}
-        chs = []
+        # The chapter list often lives on a second page. Fetch it while the details
+        # page is still being parsed instead of waiting for one request after another.
+        fut = None
         if c.get("list_path"):
+            fut = DETAIL_POOL.submit(self.soup, url.rstrip("/").rsplit("/", 1)[0] + c["list_path"])
+        chs = self._chapters(soup, c)
+        if fut is not None:
             try:
-                chs = self._chapters(self.soup(url.rstrip("/").rsplit("/", 1)[0] + c["list_path"]), c)
+                chs = self._chapters(fut.result(), c) or chs
             except Exception:
-                chs = []
-        if not chs:
-            chs = self._chapters(soup, c)
+                pass
         if c.get("newest_first", True):
             chs.reverse()
-        return {"title": txt(sel("title")), "description": txt(sel("description")), "cover": cover, "chapters": chs}
+        return {"title": title, "description": description, "cover": cover, "chapters": chs, "genres": genres}
 
     def pages(self, url):
         if self.api == "mangadex":
             return self._md_pages(url)
         if self.api == "webtoons":
             return self._wt_pages(url)
+        if self.api == "fanfox":
+            return self._ff_pages(url)
         p = self.d["pages"]
         if p.get("url_suffix"):
             url = url.rstrip("/") + p["url_suffix"]
@@ -1003,6 +1204,29 @@ class Source:
                 if u not in seen:
                     seen.add(u)
                     out.append(u)
+            return out
+        if p.get("page_urls"):  # one image per page, page URLs listed in a <select>
+            urls = []
+            for o in self.soup(url).select(p["page_urls"]):
+                u = self.abs(o.get("value") or "")
+                if u and u not in urls:
+                    urls.append(u)
+
+            def one(pu):
+                found = []
+                for i in self.soup(pu).select(p["image"]):
+                    u = self.abs(attr(i, p.get("attr", IMG_ATTRS)))
+                    if u and u not in found:
+                        found.append(u)
+                return found
+
+            if urls:
+                with ThreadPoolExecutor(max_workers=min(6, len(urls))) as ex:
+                    for part in ex.map(one, urls):
+                        for u in part:
+                            if u not in seen:
+                                seen.add(u)
+                                out.append(u)
             return out
         for i in self.soup(url).select(p["image"]):
             u = self.abs(attr(i, p.get("attr", IMG_ATTRS)))
@@ -1020,7 +1244,27 @@ class Source:
     @staticmethod
     def _md_title(a):
         t = a.get("title") or {}
-        return t.get("en") or next(iter(t.values()), "Untitled")
+        if t.get("en"):
+            return t["en"]
+        for alt in a.get("altTitles") or []:
+            if isinstance(alt, dict) and alt.get("en"):
+                return alt["en"]
+        for key in ("ja-ro", "ko-ro", "zh-ro", "ja", "ko", "zh", "zh-hk"):
+            if t.get(key):
+                return t[key]
+        return next(iter(t.values()), "Untitled")
+
+    @staticmethod
+    def _md_tags(a):
+        out = []
+        for t in a.get("tags") or []:
+            ta = t.get("attributes") or {}
+            if ta.get("group") not in ("genre", "theme"):
+                continue
+            name = (ta.get("name") or {}).get("en") or next(iter((ta.get("name") or {}).values()), "")
+            if name and name not in out:
+                out.append(name)
+        return out
 
     def _md_cover(self, x, size=".256.jpg"):
         for r in x.get("relationships", []):
@@ -1042,14 +1286,16 @@ class Source:
         if genre:
             p["includedTags[]"] = [genre]
         return [{"title": self._md_title(x["attributes"]), "url": f"https://mangadex.org/title/{x['id']}",
-                 "cover": self._md_cover(x), "source": self.id} for x in self._md("/manga", **p)["data"]]
+                 "cover": self._md_cover(x), "source": self.id,
+                 "genres": self._md_tags(x["attributes"])} for x in self._md("/manga", **p)["data"]]
 
     def _md_ratings(self):
         return ["safe", "suggestive", "erotica", "pornographic"] if S("nsfw") else ["safe", "suggestive"]
 
     def _md_feed(self, mid, langs):
         """One pass over a manga's chapter feed. langs=None means 'every language'."""
-        chs, seen, off = [], set(), 0
+        found: dict[Any, tuple[int, dict[str, Any]]] = {}
+        off = 0
         while True:
             p = {"order[chapter]": "asc", "limit": 500, "offset": off, "includeExternalUrl": 0,
                  "contentRating[]": self._md_ratings()}
@@ -1058,31 +1304,35 @@ class Source:
             j = self._md(f"/manga/{mid}/feed", **p)
             for c in j["data"]:
                 ca = c["attributes"]
-                if not ca.get("pages"):
+                if not ca.get("pages") or ca.get("externalUrl"):
                     continue
                 num = ca.get("chapter")
                 key = num if num is not None else (None, ca.get("translatedLanguage"), c["id"])
-                if key in seen:
-                    continue
-                seen.add(key)
-                title = f"Chapter {num}" if num else "Oneshot"
+                title = f"Chapter {num}" if num not in (None, "") else "Oneshot"
                 if ca.get("title"):
-                    title += f" – {ca['title']}"
-                chs.append({"title": title, "url": f"https://mangadex.org/chapter/{c['id']}"})
+                    title += f" \u2014 {ca['title']}"
+                pages = int(ca.get("pages") or 0)
+                prev = found.get(key)
+                # Several groups can upload the same chapter number. Keep the version
+                # with the most pages, so a split/partial upload cannot look incomplete.
+                if prev is None or pages > prev[0]:
+                    found[key] = (pages, {"title": title, "url": f"https://mangadex.org/chapter/{c['id']}"})
             off += 500
             if off >= j.get("total", 0):
                 break
-        return chs
+        return [ch for _pages, ch in found.values()]
 
     def _md_details(self, url):
         mid = url.rstrip("/").split("/")[-1]
         x = self._md(f"/manga/{mid}", **{"includes[]": ["cover_art"]})["data"]
         a = x["attributes"]
         chs = self._md_feed(mid, ["en"])
-        if not chs:  # lots of titles only have chapters in other languages - don't show an empty list
-            chs = self._md_feed(mid, None)
-        return {"title": self._md_title(a), "description": (a.get("description") or {}).get("en", ""),
-                "cover": self._md_cover(x, ".512.jpg"), "chapters": chs}
+        desc = (a.get("description") or {}).get("en", "")
+        if not chs:
+            desc = (desc + "\n\nNo English chapters are available on MangaDex for this title. "
+                           "Licensed releases that only exist as external links are skipped.").strip()
+        return {"title": self._md_title(a), "description": desc,
+                "cover": self._md_cover(x, ".512.jpg"), "chapters": chs, "genres": self._md_tags(a)}
 
     def _md_pages(self, url):
         j = self._md(f"/at-home/server/{url.rstrip('/').split('/')[-1]}")
@@ -1125,8 +1375,10 @@ class Source:
             if not title:
                 continue
             img = a.select_one("img")
+            g = a.select_one(".info_text .genre, .info_text_inner .genre")
             out.append({"title": title, "url": u,
-                        "cover": attr(img, ["data-src", "src"]) if img else "", "source": self.id})
+                        "cover": attr(img, ["data-src", "src"]) if img else "", "source": self.id,
+                        "genres": [txt(g)] if g and txt(g) else []})
         return out
 
     def _wt_details(self, url):
@@ -1135,7 +1387,7 @@ class Source:
         desc = soup.select_one("#_asideDetail p.summary") or soup.select_one("p.summary")
         cov = soup.select_one("meta[property='og:image']")
         return {"title": txt(t), "description": txt(desc), "cover": attr(cov, []) if cov else "",
-                "chapters": self._wt_chapters(url)}
+                "chapters": self._wt_chapters(url), "genres": self._tag_list(soup)}
 
     def _wt_chapters(self, url):
         m = re.search(r"title_no=(\d+)", url or "")
@@ -1165,12 +1417,75 @@ class Source:
                 out.append(self.abs(u))
         return out
 
+    # ---- FanFox (reader pages are handed out one-by-one by a packed-JS AJAX endpoint) ----
+    def _ff_pages(self, url):
+        html = self.get(url).text
+        mc = re.search(r"var\s+chapterid\s*=\s*(\d+)", html)
+        mn = re.search(r"var\s+imagecount\s*=\s*(\d+)", html)
+        if not mc:
+            return []
+        cid = mc.group(1)
+        total = int(mn.group(1)) if mn else 0
+        base = url.rsplit("/", 1)[0]
+        ref = url
+
+        def one(i):
+            try:
+                raw = _js_unpack(self.get(f"{base}/chapterfun.ashx?cid={cid}&page={i}", referer=ref).text)
+                pix = re.search(r'var\s+pix\s*=\s*"([^"]+)"', raw)
+                img = re.search(r'"(/[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"', raw, re.I)
+                if not (pix and img):
+                    return ""
+                host = pix.group(1).replace("\\/", "/")
+                if host.startswith("//"):
+                    host = "https:" + host
+                return host + img.group(1).replace("\\/", "/")
+            except Exception:
+                return ""
+
+        if not total:
+            return []
+        # FanFox needs one request per page; a few in parallel keeps a 20-page chapter quick.
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            urls = list(ex.map(one, range(1, total + 1)))
+        return [u for u in urls if u]
+
 
 SOURCES = {}
+# Listing pages are reused when the user bounces between sources. Without this, every
+# source switch re-downloaded the same HTML and rebuilt the same 20-30 cards.
+LIST_CACHE: "OrderedDict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]]" = OrderedDict()
+LIST_LOCK = threading.Lock()
+LIST_TTL = 180.0
+LIST_MAX = 240
+
+
+def listing_cache_get(key):
+    now = time.time()
+    with LIST_LOCK:
+        hit = LIST_CACHE.get(key)
+        if hit is None:
+            return None
+        ts, items = hit
+        if now - ts > LIST_TTL:
+            LIST_CACHE.pop(key, None)
+            return None
+        LIST_CACHE.move_to_end(key)
+        return [{**x, "genres": list(x.get("genres") or [])} for x in items]
+
+
+def listing_cache_put(key, items):
+    with LIST_LOCK:
+        LIST_CACHE[key] = (time.time(), [dict(x) for x in items])
+        LIST_CACHE.move_to_end(key)
+        while len(LIST_CACHE) > LIST_MAX:
+            LIST_CACHE.popitem(last=False)
 
 
 def rebuild_sources():
     SOURCES.clear()
+    with LIST_LOCK:
+        LIST_CACHE.clear()
     if not os.path.exists(SRC_FILE):
         with open(SRC_FILE, "w", encoding="utf-8") as f:
             json.dump({"sources": []}, f, indent=2)
@@ -1179,7 +1494,8 @@ def rebuild_sources():
             data = json.load(f).get("sources", [])
     except Exception:
         data = []
-    for d in data:
+    # 18+ sources always sort after the regular ones, regardless of JSON order.
+    for d in sorted(data, key=lambda x: bool(x.get("nsfw"))):
         try:
             SOURCES[d["id"]] = Source(d)
         except Exception:
@@ -1189,8 +1505,15 @@ def rebuild_sources():
 # ---------------- background work ----------------
 Q = queue.Queue()
 NET_POOL = ThreadPoolExecutor(4)
-IMG_POOL = ThreadPoolExecutor(8)
+DETAIL_POOL = ThreadPoolExecutor(4)   # details page + its separate chapter-list page, in parallel
+IMG_POOL = ThreadPoolExecutor(12)
 PAGE_POOL = ThreadPoolExecutor(6)
+# Decoded card thumbnails (memory only). Without this every section change decoded the
+# same covers from disk again, which is what made scrolling and menu switches feel rough.
+THUMB_CACHE: "OrderedDict[tuple[Any, ...], Image.Image]" = OrderedDict()
+THUMB_LOCK = threading.Lock()
+THUMB_MAX = 600
+
 WT_MAX_INFLIGHT = 4        # pages downloading at once in webtoon mode
 WT_AHEAD = 3               # pages kept loaded below the viewport
 WT_BEHIND = 1              # ... and above it
@@ -1226,14 +1549,32 @@ def img_size(url):
 
 
 
-def bg(fn, cb):
+def bg(fn, cb, pool=None):
     def w():
         try:
             res = (fn(), None)
         except Exception as e:
             res = (None, e)
         Q.put((cb, res))
-    NET_POOL.submit(w)
+    (pool or NET_POOL).submit(w)
+
+
+def fetch_pages(src, url):
+    """Fetch a chapter's page list. Source.get already retries 429/5xx, so one extra
+    attempt here is enough - stacking two long retry loops made failures feel frozen."""
+    last = None
+    for attempt in range(2):
+        try:
+            pages = src.pages(url)
+            if pages:
+                return pages
+        except Exception as e:
+            last = e
+        if attempt < 1:
+            time.sleep(0.6)
+    if last:
+        raise last
+    return []
 
 
 def load_img(src, url, cb, size=None, width=None, height=None, pool=None, alive=None):
@@ -1244,16 +1585,56 @@ def load_img(src, url, cb, size=None, width=None, height=None, pool=None, alive=
     """
     if not src or not url:
         return False
+    ck = (url, width, height, tuple(size) if size else None)
+    cacheable = bool(size)
+
+    def cached_image():
+        if not cacheable:
+            return None
+        with THUMB_LOCK:
+            im = THUMB_CACHE.get(ck)
+            if im is not None:
+                THUMB_CACHE.move_to_end(ck)
+            return im
+
+    def remember(im):
+        if not cacheable or im is None:
+            return
+        with THUMB_LOCK:
+            THUMB_CACHE[ck] = im
+            THUMB_CACHE.move_to_end(ck)
+            while len(THUMB_CACHE) > THUMB_MAX:
+                THUMB_CACHE.popitem(last=False)
 
     def w():
         if alive and not alive():
             return
+        hit = cached_image()
+        if hit is not None:
+            Q.put((lambda r, e: cb(r), (hit, None)))
+            return
         im = None
-        new_file = False
         try:
             p = cache_path(url)
             if not os.path.exists(p):
-                data = src.get(url).content
+                data, last = None, None
+                for attempt in range(2):
+                    if alive and not alive():
+                        return
+                    try:
+                        data = src.get(url).content
+                        if data:
+                            break
+                        last = RuntimeError("empty image response")
+                    except Exception as e:
+                        last = e
+                        resp = getattr(e, "response", None)
+                        if resp is not None and 400 <= getattr(resp, "status_code", 0) < 500:
+                            break  # 404/403 will not fix itself; don't stall the cover queue
+                    if attempt < 1:
+                        time.sleep(0.35)
+                if not data:
+                    raise last or RuntimeError("image download failed")
                 tmp = f"{p}.{threading.get_ident()}.part"  # two pages of the same url must not share a temp file
                 try:
                     with open(tmp, "wb") as f:
@@ -1265,7 +1646,6 @@ def load_img(src, url, cb, size=None, width=None, height=None, pool=None, alive=
                             os.remove(tmp)
                         except OSError:
                             pass
-                new_file = True
             if alive and not alive():
                 return
             im = Image.open(p)
@@ -1276,7 +1656,7 @@ def load_img(src, url, cb, size=None, width=None, height=None, pool=None, alive=
                 except Exception:
                     pass
                 im = im.convert("RGB")
-                im = im.resize((width, th), Image.BICUBIC)
+                im = im.resize((width, th), Image.Resampling.BICUBIC)
             elif size:
                 try:
                     im.draft("RGB", (size[0] * 2, size[1] * 2))
@@ -1287,12 +1667,12 @@ def load_img(src, url, cb, size=None, width=None, height=None, pool=None, alive=
                 im = im.convert("RGB")
         except Exception:
             im = None
-            if new_file:  # an html error page saved as an image must not sit in the cache and fail forever
-                try:
-                    if os.path.getsize(cache_path(url)) < 1024:
-                        os.remove(cache_path(url))
-                except OSError:
-                    pass
+            try:  # a broken/HTML download must not sit in the cache and fail forever
+                if os.path.exists(cache_path(url)):
+                    os.remove(cache_path(url))
+            except OSError:
+                pass
+        remember(im)
         Q.put((lambda r, e: cb(r), (im, None)))
 
     (pool or IMG_POOL).submit(w)
@@ -1341,6 +1721,7 @@ def run_job(job):
                                 raise
                             time.sleep(15 if "429" in str(e) else 3 * (attempt + 1))
                     time.sleep(S("dl_delay") * random.uniform(0.7, 1.4))
+                assert data is not None
                 z.writestr(f"{i + 1:03d}.{_ext(data)}", data)
                 job["done"] = i + 1
         os.replace(tmp, dest)
@@ -1479,34 +1860,128 @@ class App(ctk.CTk):
         self.title("Sablja Reader")
         self.geometry("1280x800")
         self.minsize(1000, 640)
+        self._fs = bool(S("start_fullscreen"))
+        self._borderless = False
+        self._win_geom = "1280x800"
+        if self._fs:
+            self.after(60, self.start_fullscreen)
         ico = os.path.join(DATA, "sablja2.ico")   # new name so the new logo replaces an old cached icon
         try:
             make_icon_file(ico)
             self.after(300, lambda: self.iconbitmap(ico))  # CTk sets its own icon at ~200ms, so set ours after
         except Exception:
             try:
-                self.iconphoto(True, ImageTk.PhotoImage(make_icon(64)))
+                self.iconphoto(True, cast(tk.PhotoImage, ImageTk.PhotoImage(make_icon(64))))
             except Exception:
                 pass
         style_ttk()
-        self.cur, self.back, self.reader, self.cur_detail, self.b = None, "Library", None, None, None
+        self.cur, self.back, self.cur_detail = None, "Library", None
+        self.reader: dict[str, Any] = {}
+        self.b: dict[str, Any] = {}
         self.rtok = self.dtok = self.rgen = 0
         self.lib_folder, self.sel, self.desc, self.desc_full = "All", set(), True, False
         self.genre_map, self.kind_btns, self.zoom_job = {}, {}, None
         self.genre_menu, self.btok = None, 0
         self.stok, self.search_src = 0, None
         self._seen_titles = set()
+        self._grid_state: dict[Any, dict[str, Any]] = {}
+        self._reflow_jobs: dict[str, Any] = {}
+        self._side_job = None
+        self._mmb = None
         self.rand_mode, self._rand_open, self.rdm_tok = False, False, 0
         self.rand_hist, self.rand_i, self.rand_seen = [], -1, set()
         self._fresh, self._fresh_thr, self._fresh_last = {}, None, 0
         self.nav_build()
         rebuild_sources()
         self.bind_all("<MouseWheel>", self.on_wheel, add="+")
+        self.bind_all("<Button-2>", self.mmb_press, add="+")
+        self.bind_all("<B2-Motion>", self.mmb_drag, add="+")
+        self.bind_all("<ButtonRelease-2>", self.mmb_release, add="+")
         self.bind_all("<Key>", self.on_key, add="+")
+        self.bind_all("<F11>", self.toggle_fullscreen, add="+")
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.build_ui()
         self.after(60, self.poll)
         self.after(500, self.watch)
+
+    def start_fullscreen(self):
+        self.set_borderless(True, save_geom=False)
+
+    def toggle_fullscreen(self, _event=None):
+        """F11 (or the title-bar button): borderless fullscreen with our own controls."""
+        self.set_borderless(not self._borderless)
+
+    def set_borderless(self, on, save_geom=True):
+        """Borderless fullscreen = content edge to edge, with the app's own window bar.
+
+        Tk's `-fullscreen` hides the title bar but also ignores the custom bar, which is
+        why the app used to end up with either no controls or two sets of them.
+        """
+        on = bool(on)
+        if on == self._borderless:
+            self._fs = on
+            self.sync_window_controls()
+            return
+        try:
+            if on:
+                if not self._borderless and save_geom:
+                    self._win_geom = self.geometry()
+                self._fs = self._borderless = True
+                self.overrideredirect(True)
+                w, h = self.winfo_screenwidth(), self.winfo_screenheight()
+                self.geometry(f"{w}x{h}+0+0")
+                self.lift()
+                self.after(20, self.focus_force)
+            else:
+                self._fs = self._borderless = False
+                self.overrideredirect(False)
+                geom = self._win_geom or "1280x800"
+                if "+" not in geom:
+                    try:
+                        w, h = (int(v) for v in geom.lower().split("x", 1))
+                        geom = f"{w}x{h}+{max(0, (self.winfo_screenwidth() - w) // 2)}+" \
+                               f"{max(0, (self.winfo_screenheight() - h) // 2)}"
+                    except Exception:
+                        geom = "1280x800"
+                self.geometry(geom)
+                self.deiconify()
+            self.sync_window_controls()
+            self.after(40, self.paint_side)
+        except Exception:
+            # Non-Windows fallback if a window manager refuses overrideredirect.
+            try:
+                self._fs = self._borderless = on
+                self.attributes("-fullscreen", on)
+                self.sync_window_controls()
+            except Exception:
+                pass
+
+    def sync_window_controls(self):
+        """Show the custom window bar only when the native title bar is gone."""
+        try:
+            if not hasattr(self, "winbar"):
+                return
+            if self._borderless:
+                kids = [w for w in self.main.pack_slaves() if w is not self.winbar]
+                if kids:
+                    self.winbar.pack(side="top", fill="x", before=kids[0])
+                else:
+                    self.winbar.pack(side="top", fill="x")
+            else:
+                self.winbar.pack_forget()
+            if hasattr(self, "win_fs"):
+                self.win_fs.configure(text="\u2750" if self._borderless else "\u25a1")
+        except Exception:
+            pass
+
+    def minimize_window(self):
+        """Leave fullscreen first, so a minimized window still has a taskbar entry."""
+        try:
+            if self._borderless:
+                self.set_borderless(False)
+            self.iconify()
+        except Exception:
+            pass
 
     def build_ui(self):
         """Create the whole window: sidebar canvas, views and every view's widgets.
@@ -1525,11 +2000,31 @@ class App(ctk.CTk):
         self.side = tk.Canvas(self, width=210, highlightthickness=0, bd=0, bg=SIDE)
         self.side.grid(row=0, column=0, sticky="ns")
         self.nav, self._nav_items, self._hover, self._logo_img = {}, {}, None, None
-        self.side.bind("<Configure>", lambda e: self.paint_side())
+        self.side.bind("<Configure>", lambda e: self.sched_paint_side())
         self.after(40, self.paint_side)
 
         self.main = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
         self.main.grid(row=0, column=1, sticky="nsew")
+
+        # A slim title strip over the content keeps window controls in the usual top-right
+        # place - also when the app starts in borderless fullscreen and has no native title bar.
+        self.winbar = ctk.CTkFrame(self.main, height=32, fg_color="transparent", corner_radius=0)
+        self.winbar.pack(side="top", fill="x")
+        self.winbar.pack_propagate(False)
+        self.win_close = ctk.CTkButton(self.winbar, text="\u2715", command=self.close, width=30, height=24,
+                                       corner_radius=6, fg_color="transparent", hover_color="#a83a3a",
+                                       text_color=MUTED, font=("Segoe UI", 11, "bold"))
+        self.win_close.pack(side="right", padx=(4, 10), pady=4)
+        self.win_fs = ctk.CTkButton(self.winbar, text="\u2750" if self._fs else "\u25a1",
+                                    command=self.toggle_fullscreen, width=30, height=24, corner_radius=6,
+                                    fg_color="transparent", hover_color=BTN_HI, text_color=MUTED,
+                                    font=("Segoe UI", 11, "bold"))
+        self.win_fs.pack(side="right", padx=4, pady=4)
+        self.win_min = ctk.CTkButton(self.winbar, text="\u2014", command=self.minimize_window, width=30, height=24,
+                                     corner_radius=6, fg_color="transparent", hover_color=BTN_HI,
+                                     text_color=MUTED, font=("Segoe UI", 11, "bold"))
+        self.win_min.pack(side="right", padx=4, pady=4)
+
         self.views = {n: ctk.CTkFrame(self.main, fg_color="transparent", corner_radius=0)
                       for n in ["Library", "History", "Rating", "Sources", "Search", "Randomizer",
                                 "Downloads", "Settings", "Details", "Reader"]}
@@ -1540,6 +2035,7 @@ class App(ctk.CTk):
                         "Rating": self.refresh_rating, "Sources": self.refresh_sources,
                         "Settings": self.refresh_settings, "Search": self.refresh_search}
         self.show(self.cur or "Library")
+        self.sync_window_controls()      # no duplicate buttons while we have a native title bar
 
     def rebuild_ui(self):
         """Throw the widgets away and build them again (used by the theme switch)."""
@@ -1547,11 +2043,12 @@ class App(ctk.CTk):
             return
         self._rebuilding = True
         try:
-            keep = self.cur if self.cur in ("Library", "History", "Rating", "Sources", "Search",
+            keep = self.cur if self.cur in ("Library", "History", "Rating", "Sources",
                                             "Randomizer", "Downloads", "Settings") else "Library"
             for w in self.winfo_children():
                 w.destroy()
-            self.cur, self.reader, self.cur_detail, self.b = None, None, None, None
+            self.cur, self.cur_detail = None, None
+            self.reader, self.b = {}, {}
             self.rand_mode, self._rand_open = False, False
             self.desc_full, self.desc, self.sel = False, True, set()
             self.nav_build()
@@ -1610,7 +2107,7 @@ class App(ctk.CTk):
 
     def nav_build(self):
         """Sidebar entries; History can be hidden from Settings."""
-        base = ["Library", "History", "Rating", "Sources", "Search", "Randomizer", "Downloads", "Settings"]
+        base = ["Library", "History", "Rating", "Sources", "Randomizer", "Downloads", "Settings"]
         self.nav_order = [n for n in base if n != "History" or S("show_history")]
 
     def set_history_visible(self, on):
@@ -1621,7 +2118,17 @@ class App(ctk.CTk):
             self.show("Library")
 
     # ----- sidebar (canvas so the paper texture shows) -----
+    def sched_paint_side(self):
+        """Debounce Configure storms (fullscreen switch / window resize)."""
+        if self._side_job:
+            try:
+                self.after_cancel(self._side_job)
+            except Exception:
+                pass
+        self._side_job = self.after(60, self.paint_side)
+
     def paint_side(self):
+        self._side_job = None
         c = self.side
         try:
             w, h = c.winfo_width() or 210, max(c.winfo_height() or 800, 320)
@@ -1637,7 +2144,10 @@ class App(ctk.CTk):
                 for x in range(0, w + ts, ts):
                     c.create_image(x, y, anchor="nw", image=tile)
         try:
-            self._logo_img = ImageTk.PhotoImage(make_icon(128).resize((42, 42), Image.LANCZOS))
+            self._logo_img = getattr(self, "_logo42", None)
+            if self._logo_img is None:
+                self._logo_img = ImageTk.PhotoImage(make_icon(128).resize((42, 42), Image.Resampling.LANCZOS))
+                self._logo42 = self._logo_img
             c.create_image(18, 26, anchor="nw", image=self._logo_img)
         except Exception:
             pass
@@ -1675,28 +2185,129 @@ class App(ctk.CTk):
     def title_label(self, parent, text):
         return ctk.CTkLabel(parent, text=text, font=("Segoe UI", 26, "bold"), text_color=SILVER_HI, anchor="w")
 
-    def cols_for(self, extra=0, card=162):
-        return max(2, (self.main.winfo_width() - 80 - extra) // card)
+    def cols_for(self, extra=0, card=None, host=None, pad=12):
+        """How many cards fit. Card sizes are logical px, widget widths are physical px,
+        so the DPI scale factor has to be applied or the last column gets clipped."""
+        card = card or CARD_CELL
+        try:
+            sc = float(ctk.ScalingTracker.get_widget_scaling(host or self))
+        except Exception:
+            sc = 1.0
+        width = 0
+        if host is not None:
+            try:
+                host.update_idletasks()
+                canvas = getattr(host, "_parent_canvas", None)
+                width = canvas.winfo_width() if canvas is not None else host.winfo_width()
+            except Exception:
+                width = 0
+            if width > 1:
+                width -= pad + 24            # scrollbar + breathing room
+        if width <= 1:
+            width = self.main.winfo_width() - extra * sc - 48
+        return max(1, int(max(0, width) // (card * sc)))
 
     # ----- cards -----
-    def grid_cards(self, parent, items, cols, cb, start=0, small=False, ctx=None, badge_fn=None):
-        def step(lo):
+    def grid_cards(self, parent, items, cols, cb, start=0, small=False, ctx=None, badge_fn=None,
+                   alive=None, append=False):
+        """Queue cards for `parent`; a single pump builds them a few at a time.
+
+        append=False starts a fresh render (anything still queued is dropped). append=True adds to the
+        running one. Cards are keyed by grid index, so a failed or cancelled batch can't leave a gap."""
+        st = self._grid_state.get(parent)
+        if st is None or not append:
+            st = {"queue": [], "items": {}, "running": False, "retries": 0}
+            self._grid_state[parent] = st
+        st.update(cols=cols, cb=cb, small=small, ctx=ctx, badge_fn=badge_fn, alive=alive)
+        for k, it in enumerate(items):
+            st["items"][start + k] = it
+            st["queue"].append(start + k)
+        if not st["running"]:
+            st["running"] = True
+            self._grid_pump(parent, st)
+
+    def _grid_pump(self, parent, st):
+        try:
+            live = bool(parent.winfo_exists()) and self._grid_state.get(parent) is st \
+                and (st["alive"] is None or st["alive"]())
+        except Exception:
+            live = False
+        if not live:
+            st["running"] = False
             try:
                 if not parent.winfo_exists():
-                    return
+                    self._grid_state.pop(parent, None)
             except Exception:
-                return
-            for i in range(lo, min(lo + 6, len(items))):
-                it = items[i]
-                badge = badge_fn(it) if badge_fn else 0
-                self.make_card(parent, it, start + i, cols, cb, small, ctx, badge)
-            if lo + 6 < len(items):
-                self.after(10, lambda: step(lo + 6))
-        step(0)
+                self._grid_state.pop(parent, None)
+            return
+        for _ in range(6):
+            if not st["queue"]:
+                break
+            k = st["queue"].pop(0)
+            try:
+                it = st["items"][k]
+                badge = st["badge_fn"](it) if st["badge_fn"] else 0
+                self.make_card(parent, it, k, st["cols"], st["cb"], st["small"], st["ctx"], badge)
+            except Exception:
+                traceback.print_exc()       # one bad card must not take the rest of the page with it
+        if st["queue"]:
+            self.after(10, lambda: self._grid_pump(parent, st))
+            return
+        # queue drained: make sure every index really has a card, re-queue any that are missing
+        try:
+            have = {getattr(w, "grid_idx", -1) for w in parent.winfo_children()}
+        except Exception:
+            have = set()
+        miss = [k for k in sorted(st["items"]) if k not in have]
+        if miss and st["retries"] < 3:
+            st["retries"] += 1
+            st["queue"].extend(miss)
+            self.after(10, lambda: self._grid_pump(parent, st))
+            return
+        st["running"] = False
+
+    # --- re-flow the grid when the window size changes ---
+    def reflow(self, parent, cols):
+        cards = [w for w in parent.winfo_children() if hasattr(w, "grid_idx")]
+        for w in sorted(cards, key=lambda w: getattr(w, "grid_idx")):
+            k = getattr(w, "grid_idx")
+            w.grid(row=k // cols, column=k % cols)
+
+    def sched_reflow(self, which):
+        old = self._reflow_jobs.get(which)
+        if old:
+            try:
+                self.after_cancel(old)
+            except Exception:
+                pass
+        self._reflow_jobs[which] = self.after(180, lambda: self.do_reflow(which))
+
+    def do_reflow(self, which):
+        self._reflow_jobs[which] = None
+        try:
+            if which == "src" and self.cur == "Sources" and self.b and getattr(self, "holder", None):
+                cols = self.cols_for(host=self.browse_scroll, pad=24, extra=220)
+                if cols != self.b.get("cols"):
+                    self.b["cols"] = cols
+                    st = self._grid_state.get(self.holder)
+                    if st:
+                        st["cols"] = cols
+                    self.reflow(self.holder, cols)
+            elif which == "lib" and self.cur == "Library":
+                cols = self.cols_for(host=self.lib_scroll)
+                if cols != getattr(self, "lib_cols", cols):
+                    self.lib_cols = cols
+                    st = self._grid_state.get(self.lib_scroll)
+                    if st:
+                        st["cols"] = cols
+                    self.reflow(self.lib_scroll, cols)
+        except Exception:
+            pass
 
     def make_card(self, parent, m, i, cols, cb, small=False, ctx=None, badge=0):
-        iw, ih = (104, 148) if small else (138, 196)
+        iw, ih = (SMALL_W, SMALL_H) if small else (CARD_W, CARD_H)
         card = ctk.CTkFrame(parent, width=iw + 12, corner_radius=12, fg_color=CARD)
+        setattr(card, "grid_idx", i)       # used by the gap check and by reflow()
         card.grid(row=i // cols, column=i % cols, padx=6, pady=6, sticky="n")
         img = ctk.CTkLabel(card, text="", width=iw, height=ih, corner_radius=8, fg_color=PANEL)
         img.pack(padx=6, pady=(6, 2))
@@ -1706,8 +2317,18 @@ class App(ctk.CTk):
                          ).place(relx=1.0, rely=0.0, x=-10, y=8, anchor="ne")
         t = m["title"] if len(m["title"]) < 46 else m["title"][:43] + "…"
         ttl = ctk.CTkLabel(card, text=t, wraplength=iw - 6, height=34 if small else 44, font=("Segoe UI", 11 if small else 12), text_color=TEXT)
-        ttl.pack(padx=6, pady=(0, 6))
-        for w in (card, img, ttl):
+        show_genres = S("card_genres")
+        genres = (m.get("genres") or cached_genres(m)) if show_genres else []
+        reserve = show_genres and bool(genres)
+        ttl.pack(padx=6, pady=(0, 2 if reserve else 6))
+        clickable = [card, img, ttl]
+        if reserve:
+            gl = ctk.CTkLabel(card, text=genre_text(genres, 1 if small else 2), wraplength=iw - 8,
+                              height=16 if small else 28, font=("Segoe UI", 8 if small else 9),
+                              text_color=SILVER_DIM, justify="center")
+            gl.pack(padx=6, pady=(0, 5))
+            clickable.append(gl)
+        for w in clickable:
             w.bind("<Button-1>", lambda e, m=m: cb(m))
             w.bind("<Enter>", lambda e, c=card: c.configure(fg_color=CARD_HI))
             w.bind("<Leave>", lambda e, c=card: c.configure(fg_color=CARD))
@@ -1730,6 +2351,7 @@ class App(ctk.CTk):
         self.chip_row.pack(fill="x", padx=28, pady=(0, 8))
         self.lib_scroll = ctk.CTkScrollableFrame(v, fg_color="transparent")
         self.lib_scroll.pack(fill="both", expand=True, padx=18, pady=(0, 12))
+        self.lib_scroll._parent_canvas.bind("<Configure>", lambda e: self.sched_reflow("lib"), add="+")
 
     def popup(self, e, entries):
         mn = tk.Menu(self, tearoff=0, bg=PANEL, fg=TEXT, activebackground=BTN_HI, activeforeground=SILVER_HI, bd=0)
@@ -1785,11 +2407,12 @@ class App(ctk.CTk):
         if not shown:
             msg = ("Nothing downloaded yet.\nUse the ⬇ Download button on a manga's page."
                    if self.lib_folder == DL_VIEW_CHIP else
-                   "Nothing here yet.\nOpen a manga from Sources or Search and press Bookmark.\n"
+                   "Nothing here yet.\nOpen a manga from Sources and press Bookmark.\n"
                    "Right-click a cover to move it into a folder.")
             ctk.CTkLabel(self.lib_scroll, text=msg, font=("Segoe UI", 14), text_color=MUTED).pack(pady=90)
         else:
-            self.grid_cards(self.lib_scroll, shown, self.cols_for(), self.open_manga,
+            self.lib_cols = self.cols_for(host=self.lib_scroll)
+            self.grid_cards(self.lib_scroll, shown, self.lib_cols, self.open_manga,
                             badge_fn=self.new_chapter_count,
                             ctx=self.dl_ctx if self.lib_folder == DL_VIEW_CHIP else self.lib_ctx)
             self.check_new_chapters()
@@ -1838,7 +2461,7 @@ class App(ctk.CTk):
             ctk.CTkLabel(self.hist_scroll, text="Nothing read yet.\nOpen a chapter and it shows up here.",
                          font=("Segoe UI", 14), text_color=MUTED, justify="left").pack(pady=90)
             return
-        cols = self.cols_for(card=250)
+        cols = self.cols_for(card=264, host=self.hist_scroll, pad=24)
         for i, (ts, key, m, p) in enumerate(rows):
             self.make_hist_card(self.hist_scroll, key, m, p, i, cols)
 
@@ -1897,7 +2520,8 @@ class App(ctk.CTk):
         latest chapter with this profile's progress; results become 'new' badges in Library.
         Runs at most every 10 minutes."""
         now = time.time()
-        if getattr(self, "_fresh_thr", None) is not None and self._fresh_thr.is_alive():
+        thr = getattr(self, "_fresh_thr", None)
+        if thr is not None and thr.is_alive():
             return
         if not force and now - getattr(self, "_fresh_last", 0) < 600:
             return
@@ -1945,7 +2569,7 @@ class App(ctk.CTk):
         self.title_label(top, "Rating").pack(side="left")
         self.rate_info = ctk.CTkLabel(top, text="", text_color=MUTED, anchor="e")
         self.rate_info.pack(side="right")
-        ctk.CTkLabel(v, text="Right-click a cover (Library, Sources, Search or a manga page) and pick "
+        ctk.CTkLabel(v, text="Right-click a cover (Library, Sources or a manga page) and pick "
                              '"★ Rate / comment" to give it 1-10 and write a note.',
                      anchor="w", text_color=SILVER_DIM, font=("Segoe UI", 11)).pack(fill="x", padx=30, pady=(0, 8))
         self.rate_scroll = ctk.CTkScrollableFrame(v, fg_color="transparent")
@@ -1963,7 +2587,7 @@ class App(ctk.CTk):
                                                 '"★ Rate / comment".',
                          font=("Segoe UI", 14), text_color=MUTED, justify="left").pack(pady=90)
             return
-        cols = self.cols_for(card=250)
+        cols = self.cols_for(card=268, host=self.rate_scroll, pad=24)
         for i, (key, r) in enumerate(items):
             self.make_rate_card(self.rate_scroll, r, i, cols)
 
@@ -2109,7 +2733,7 @@ class App(ctk.CTk):
                        ("Remove from library", lambda: self.remove_bm(m))])
 
     def card_ctx(self, e, m):
-        """Right-click menu for manga cards in Sources / Search."""
+        """Right-click menu for manga cards in Sources."""
         bm = self.find_bm(m)
         moves = [("None (Unsorted)", lambda: self.move_to(m, ""))]
         moves += [(("· " if bm and bm.get("folder") == f else "") + f, lambda f=f: self.move_to(m, f)) for f in DB["folders"]]
@@ -2207,6 +2831,7 @@ class App(ctk.CTk):
         self.q_entry.pack(side="left")
         self.q_entry.bind("<Return>", lambda e: self.browse("search"))
         btn(bar, "Search", lambda: self.browse("search"), primary=True, width=80).pack(side="left", padx=8)
+        btn(bar, "Shuffle", self.shuffle_cards, width=86).pack(side="left", padx=(0, 8))
         self.filter_row = ctk.CTkFrame(bar, fg_color="transparent")
         self.filter_row.pack(side="left", padx=(10, 0))
         self.bstatus = ctk.CTkLabel(right, text="", text_color=MUTED, anchor="w")
@@ -2215,6 +2840,7 @@ class App(ctk.CTk):
                      text_color=SILVER_DIM, font=("Segoe UI", 11)).pack(fill="x", padx=6)
         self.browse_scroll = ctk.CTkScrollableFrame(right, fg_color="transparent")
         self.browse_scroll.pack(fill="both", expand=True)
+        self.browse_scroll._parent_canvas.bind("<Configure>", lambda e: self.sched_reflow("src"), add="+")
 
     def refresh_sources(self):
         clear(self.src_list)
@@ -2230,7 +2856,7 @@ class App(ctk.CTk):
 
     def select_source(self, src, query=""):
         self.btok += 1
-        self.b = {"src": src, "tok": 0, "loading": False, "has_more": False}
+        self.b = {"src": src, "tok": 0, "loading": False, "has_more": False, "pool": {}, "shuffle_tok": 0}
         self.src_title.configure(text=src.name + ("   (untested)" if src.d.get("untested") else ""))
         self.q_entry.delete(0, "end")
         if query:
@@ -2279,18 +2905,33 @@ class App(ctk.CTk):
                 return
             if not q:
                 return
+        try:
+            self.browse_scroll.update_idletasks()   # real inner width before choosing columns
+        except Exception:
+            pass
         b.update(kind=kind, query=q, genre=genre, page=1, n=0, tok=b["tok"] + 1, loading=False, has_more=True, err=None,
-                 seen=set(), cols=self.cols_for(190))
+                 seen=set(), pool={}, cols=self.cols_for(host=self.browse_scroll, pad=24, extra=220), shuffle_tok=b.get("shuffle_tok", 0) + 1,
+                 render=b.get("render", 0) + 1)
         for k, bt in self.kind_btns.items():
             on = k == kind
             bt.configure(fg_color=SILVER if on else BTN, text_color=INK if on else TEXT, hover_color=SILVER_HI if on else BTN_HI)
         self.bstatus.configure(text="")
         clear(self.browse_scroll)
+        self.reset_browse_scroll()
         self.holder = ctk.CTkFrame(self.browse_scroll, fg_color="transparent")
         self.holder.pack(anchor="w")
         self.footer = ctk.CTkLabel(self.browse_scroll, text="", text_color=MUTED)
         self.footer.pack(pady=16)
         self.load_more()
+
+    def reset_browse_scroll(self):
+        """Put the source listing back at the very top (it kept the old yview between sources)."""
+        try:
+            c = self.browse_scroll._parent_canvas
+            c.update_idletasks()
+            c.yview_moveto(0.0)
+        except Exception:
+            pass
 
     def load_more(self):
         b = self.b
@@ -2298,11 +2939,10 @@ class App(ctk.CTk):
             return
         b["loading"], tok = True, b["tok"]
         self.footer.configure(text="Loading…")
-        bg(lambda: b["src"].listing(b["kind"], b["page"], b["query"], b["genre"]), lambda r, e: self.more_done(tok, r, e))
+        bg(lambda: b["src"].listing(b["kind"], b["page"], b["query"], b["genre"]), lambda r, e: self.more_done(b, tok, r, e))
 
-    def more_done(self, tok, r, e):
-        b = self.b
-        if tok != b["tok"]:
+    def more_done(self, b, tok, r, e):
+        if b is not self.b or tok != b["tok"]:     # belongs to another source/search: ignore
             return
         b["loading"] = False
         if e:
@@ -2316,10 +2956,86 @@ class App(ctk.CTk):
             b["has_more"] = False
             self.footer.configure(text="End of results" if b["n"] else "No results")
             return
-        self.grid_cards(self.holder, new, b["cols"], self.open_manga, start=b["n"], ctx=self.card_ctx)
+        b.setdefault("pool", {}).update({x["url"]: x for x in new})
+        first = not b["n"]
+        rgen = b.get("render", 0)
+        self.grid_cards(self.holder, new, b["cols"], self.open_manga, start=b["n"], ctx=self.card_ctx,
+                        alive=lambda: self.b is b and b.get("render") == rgen, append=not first)
         b["n"] += len(new)
         b["page"] += 1
         self.footer.configure(text="")
+        if first:
+            self.after_idle(self.reset_browse_scroll)
+
+    # ----- shuffle -----
+    def shuffle_cards(self):
+        """Show a fresh random selection from the current source.
+
+        Cards already loaded are shuffled, plus one random listing page is pulled in when the
+        source supports pagination - so every press brings a different mix instead of the same
+        page in a new order.
+        """
+        b = self.b
+        if not b:
+            return
+        src, kind = b["src"], b.get("kind", "popular")
+        q, genre = b.get("query", ""), b.get("genre", "")
+        b["tok"] = b.get("tok", 0) + 1      # cancel any page fetch still in flight
+        b["loading"] = False
+        b["render"] = b.get("render", 0) + 1  # stop cards from an older grid run being appended
+        b["shuffle_tok"] = b.get("shuffle_tok", 0) + 1
+        tok = b["shuffle_tok"]
+        pool = list((b.get("pool") or {}).values())
+        self.bstatus.configure(text="Shuffling…")
+        try:
+            self.footer.configure(text="")
+        except Exception:
+            pass
+
+        def work():
+            out = list(pool)
+            if kind != "search":
+                for _ in range(3):
+                    try:
+                        got = src.listing(kind, random.randint(2, 12), q, genre)
+                    except Exception:
+                        got = []
+                    if got:
+                        out.extend(got)
+                        break
+            random.shuffle(out)
+            return out
+
+        bg(work, lambda r, e: self.shuffle_done(tok, r, e))
+
+    def shuffle_done(self, tok, r, e):
+        b = self.b
+        if not b or tok != b.get("shuffle_tok"):
+            return
+        if e:
+            self.bstatus.configure(text=f"Shuffle failed: {str(e)[:90]}")
+            return
+        uniq = {}
+        for x in r or []:
+            uniq.setdefault(x["url"], x)
+        items = list(uniq.values())
+        if not items:
+            self.bstatus.configure(text="Nothing to shuffle — load some cards first.")
+            return
+        random.shuffle(items)
+        b["pool"] = uniq
+        b["seen"].update(uniq)
+        b["cols"] = self.cols_for(host=self.browse_scroll, pad=24, extra=220)
+        b["render"] = b.get("render", 0) + 1
+        rgen = b["render"]
+        clear(self.holder)
+        shown = items[:96]
+        self.grid_cards(self.holder, shown, b["cols"], self.open_manga, start=0, ctx=self.card_ctx,
+                        alive=lambda: self.b is b and b.get("render") == rgen)
+        b["n"] = len(shown)
+        self.footer.configure(text="")
+        self.bstatus.configure(text=f"Shuffled {len(shown)} cards — press Shuffle again for a new mix")
+        self.after_idle(self.reset_browse_scroll)
 
     # ----- global search -----
     def build_search(self):
@@ -2406,7 +3122,7 @@ class App(ctk.CTk):
             hd.configure(text=f"{src.name}  ·  {len(r)} results")
             grid = ctk.CTkFrame(sec, fg_color="transparent")
             grid.pack(fill="x", padx=8, pady=(0, 6))
-            cols = max(3, (self.main.winfo_width() - 120) // 124)
+            cols = self.cols_for(card=SMALL_CELL, host=self.sres, pad=48)
             self.grid_cards(grid, r[:cols * 2 if len(r) > cols else cols], cols, self.open_manga, small=True,
                             ctx=self.card_ctx)
             if len(r) > cols:
@@ -2570,6 +3286,13 @@ class App(ctk.CTk):
         ctk.CTkLabel(r, text="paper texture behind the pages and the menu", text_color=MUTED,
                      font=("Segoe UI", 11)).pack(side="left", padx=10)
         r = row(f)
+        ctk.CTkLabel(r, text="Reader background", text_color=TEXT, width=190, anchor="w").pack(side="left")
+        self.set_reader_paper = menu(r, PAPERS, self.apply_reader_paper, width=200)
+        self.set_reader_paper.set(S("reader_paper"))
+        self.set_reader_paper.pack(side="left")
+        ctk.CTkLabel(r, text="starts on Graphite matte; independent of the app theme", text_color=MUTED,
+                     font=("Segoe UI", 11)).pack(side="left", padx=10)
+        r = row(f)
         self.sw_guides = ctk.CTkSwitch(r, text="In paged modes: black page borders, page numbers and the double-page gutter",
                                        progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
                                        command=lambda: self.setv("paged_guides", bool(self.sw_guides.get())))
@@ -2588,6 +3311,40 @@ class App(ctk.CTk):
             self.sw_hist.select()
         ctk.CTkFrame(f, height=8, fg_color="transparent").pack()
 
+        f = card("Window")
+        r = row(f)
+        self.sw_fs = ctk.CTkSwitch(r, text="Open in borderless fullscreen on start (F11 toggles it any time)",
+                                   progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
+                                   command=lambda: self.setv("start_fullscreen", bool(self.sw_fs.get())))
+        self.sw_fs.pack(side="left")
+        if S("start_fullscreen"):
+            self.sw_fs.select()
+        ctk.CTkFrame(f, height=8, fg_color="transparent").pack()
+
+        f = card("Report a bug / request a feature")
+        r = row(f)
+        ctk.CTkLabel(r, text="Type", text_color=TEXT, width=190, anchor="w").pack(side="left")
+        self.br_type = menu(r, ["Bug", "Source problem", "Feature request"], lambda v: None, width=180)
+        self.br_type.pack(side="left")
+        r = row(f)
+        ctk.CTkLabel(r, text="Short summary", text_color=TEXT, width=190, anchor="w").pack(side="left")
+        self.br_title = entry(r, placeholder_text="e.g. Reader freezes when I open chapter 12", width=560)
+        self.br_title.pack(side="left", fill="x", expand=True)
+        r = row(f)
+        ctk.CTkLabel(r, text="What happened?", text_color=TEXT, width=190, anchor="w").pack(side="left", anchor="n")
+        self.br_body = ctk.CTkTextbox(r, height=110, fg_color=CARD, border_color=LINE, border_width=1,
+                                      text_color=TEXT, font=FONT, corner_radius=8, wrap="word")
+        self.br_body.pack(side="left", fill="x", expand=True)
+        r = row(f)
+        btn(r, "Open GitHub issue", self.report_open, primary=True, width=150).pack(side="left", padx=(190, 8))
+        btn(r, "Copy diagnostics", self.report_copy, width=140).pack(side="left")
+        self.br_status = ctk.CTkLabel(r, text="", text_color=MUTED, anchor="w")
+        self.br_status.pack(side="left", padx=10)
+        ctk.CTkLabel(f, text="Opens a new issue on GitHub in your browser with the text and diagnostics filled in — "
+                             "you review it and press Submit. Nothing is sent automatically.",
+                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
+                     justify="left").pack(fill="x", padx=16, pady=(4, 12))
+
         f = card("Downloads (saved as one .cbz per chapter)")
         r = row(f)
         ctk.CTkLabel(r, text="Folder", text_color=TEXT, width=190, anchor="w").pack(side="left")
@@ -2602,7 +3359,7 @@ class App(ctk.CTk):
         r = row(f)
         ctk.CTkLabel(r, text="Delay between images", text_color=TEXT, width=190, anchor="w").pack(side="left")
         self.delay_lbl = ctk.CTkLabel(r, text=f"{S('dl_delay'):.1f} s", text_color=SILVER, width=50)
-        sl = ctk.CTkSlider(r, from_=0.3, to=5, number_of_steps=47, width=220, progress_color=SILVER, button_color=SILVER_HI,
+        sl = ctk.CTkSlider(r, from_=cast(int, 0.3), to=5, number_of_steps=47, width=220, progress_color=SILVER, button_color=SILVER_HI,
                            button_hover_color="white", fg_color=BTN, command=self.set_delay)
         sl.set(S("dl_delay"))
         sl.pack(side="left")
@@ -2621,76 +3378,39 @@ class App(ctk.CTk):
         sw.pack(side="left")
         if S("nsfw"):
             sw.select()
+        r = row(f)
+        swg = ctk.CTkSwitch(r, text="Show genres on cards (uses listing genres and genres already cached from details pages)",
+                            progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
+                            command=lambda: (self.setv("card_genres", bool(swg.get())),
+                                             self.refresh_card_genres_view()))
+        swg.pack(side="left")
+        if S("card_genres"):
+            swg.select()
         self.repo_status = ctk.CTkLabel(f, text="", text_color=MUTED, anchor="w")
         self.repo_status.pack(fill="x", padx=16)
         ctk.CTkLabel(f, text=f"Config file in use: {SRC_FILE}", text_color=SILVER_DIM, font=("Segoe UI", 11),
                      anchor="w", wraplength=900, justify="left").pack(fill="x", padx=16, pady=(2, 0))
         self.repo_list = ctk.CTkLabel(f, text="", anchor="w", justify="left", text_color=TEXT)
         self.repo_list.pack(fill="x", padx=16, pady=(4, 0))
-        ctk.CTkLabel(f, text="Sources shown in Sources / Search — untick any you don't want:", text_color=MUTED,
+        ctk.CTkLabel(f, text="Sources shown in the Sources tab - untick any you don't want:", text_color=MUTED,
                      font=("Segoe UI", 11), anchor="w").pack(fill="x", padx=16, pady=(6, 2))
         self.src_grid = ctk.CTkFrame(f, fg_color="transparent")
         self.src_grid.pack(fill="x", padx=16, pady=(0, 14))
         self.build_src_toggles()
 
-        self.cf_map = {s.name: s.id for s in SOURCES.values() if s.d.get("cookie")}
-        if not self.cf_map:
-            return  # nothing in sources.json needs a pasted cookie right now
-        f = card("Cloudflare-protected sources (paste your browser's User-Agent + Cookie)")
-        r = row(f)
-        ctk.CTkLabel(r, text="Source", text_color=TEXT, width=190, anchor="w").pack(side="left")
-        self.cf_pick = menu(r, list(self.cf_map), self.cf_load, width=200)
-        self.cf_pick.pack(side="left")
-        btn(r, "Load saved", lambda: self.cf_load(self.cf_pick.get()), width=110).pack(side="left", padx=8)
-        r = row(f)
-        ctk.CTkLabel(r, text="User-Agent", text_color=TEXT, width=190, anchor="w").pack(side="left")
-        self.cf_ua = entry(r, placeholder_text="Mozilla/5.0 (Windows NT 10.0; …) Chrome/1xx", width=520)
-        self.cf_ua.pack(side="left")
-        r = row(f)
-        ctk.CTkLabel(r, text="Cookie", text_color=TEXT, width=190, anchor="w").pack(side="left")
-        self.cf_ck = entry(r, placeholder_text="cf_clearance=…   (copy the whole Cookie request header)", width=520)
-        self.cf_ck.pack(side="left")
-        r = row(f)
-        btn(r, "Save", self.cf_save, primary=True, width=90).pack(side="left", padx=(190, 8))
-        btn(r, "Test", self.cf_test, width=80).pack(side="left")
-        self.cf_status = ctk.CTkLabel(r, text="", text_color=MUTED, anchor="w")
-        self.cf_status.pack(side="left", padx=10)
-        ctk.CTkLabel(f, text='Only needed for sources marked "cookie" in sources.json. Open the site in your browser → '
-                             "DevTools (F12) → Network → click any request → Request Headers → copy the User-Agent and the "
-                             "whole Cookie value here, then Save. Browser and app must be on the same network/IP.",
-                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
-                     justify="left").pack(fill="x", padx=16, pady=(6, 12))
-
-    def cf_load(self, name):
-        sid = self.cf_map.get(name)
-        h = ((DB["set"].get("headers") or {}).get(sid) or {}) if sid else {}
-        self.cf_ua.delete(0, "end"); self.cf_ua.insert(0, h.get("User-Agent", ""))
-        self.cf_ck.delete(0, "end"); self.cf_ck.insert(0, h.get("Cookie", ""))
-        self.cf_status.configure(text="Loaded saved values." if h else "Nothing saved for this source yet.")
-
-    def cf_save(self):
-        sid = self.cf_map.get(self.cf_pick.get())
-        if not sid:
-            self.cf_status.configure(text="Pick a protected source first.")
-            return
-        DB["set"].setdefault("headers", {})[sid] = {"User-Agent": self.cf_ua.get().strip(),
-                                                    "Cookie": self.cf_ck.get().strip()}
-        save_db()
-        self.cf_status.configure(text=f"Saved for {self.cf_pick.get()} — re-open the source to use it.")
-
-    def cf_test(self):
-        sid = self.cf_map.get(self.cf_pick.get())
-        src = SOURCES.get(sid) if sid else None
-        if not src:
-            self.cf_status.configure(text="Pick a protected source first.")
-            return
-        self.cf_status.configure(text="Testing…")
-        bg(lambda: src.get(src.base + "/").status_code,
-           lambda r, e: self.cf_status.configure(text=f"OK — HTTP {r} (access granted)" if not e else f"Failed: {str(e)[:90]}"))
-
     def setv(self, k, v):
         DB["set"][k] = v
         save_db()
+
+    def refresh_card_genres_view(self):
+        """Apply the genre switch to the cards that are already on screen."""
+        try:
+            if self.cur == "Library":
+                self.refresh_library()
+            elif self.cur == "Sources" and self.b:
+                self.browse(self.b.get("kind", "popular"), self.b.get("genre", ""))
+        except Exception:
+            pass
 
     def set_delay(self, v):
         v = round(float(v), 1)
@@ -2756,6 +3476,11 @@ class App(ctk.CTk):
         theme_pick(name)
         self.after(10, self.rebuild_ui)     # let the option-menu callback return before we destroy it
 
+    def apply_reader_paper(self, name):
+        self.setv("reader_paper", name)
+        if self.cur == "Reader":
+            self.build_body()
+
     def reload_sources(self):
         rebuild_sources()
         self.repo_status.configure(text=f"Loaded {len(SOURCES)} sources from {SRC_FILE}")
@@ -2765,9 +3490,53 @@ class App(ctk.CTk):
         self.refresh_search()
 
     def clear_cache(self):
+        with THUMB_LOCK:
+            THUMB_CACHE.clear()
         shutil.rmtree(CACHE, ignore_errors=True)
         os.makedirs(CACHE, exist_ok=True)
         self.repo_status.configure(text="Image cache cleared")
+
+    # ----- bug report -----
+    def report_diag(self):
+        """Technical context the maintainer needs, without any reading history or personal data."""
+        active = self.b.get("src") if self.b else None
+        src = getattr(active, "name", "none")
+        return "\n".join([
+            f"App version: {APP_VERSION}",
+            f"OS: {platform.platform()}",
+            f"Python: {platform.python_version()}" + ("  (frozen exe)" if getattr(sys, "frozen", False) else ""),
+            f"Window: {self.winfo_width()}x{self.winfo_height()}  borderless={self._borderless}",
+            f"Reading mode: {S('mode')}   Background: {S('paper')}   Reader background: {S('reader_paper')}",
+            f"Sources loaded: {len(SOURCES)}   Visible in Sources: "
+            f"{len([s for s in SOURCES.values() if (S('nsfw') or not s.nsfw) and not source_hidden(s.id)])}",
+            f"Selected source: {src}",
+            f"Data folder: {DATA}",
+            f"curl_cffi available: {bool(cffi)}",
+        ])
+
+    def report_open(self):
+        kind = self.br_type.get() if hasattr(self, "br_type") else "Bug"
+        title = self.br_title.get().strip() if hasattr(self, "br_title") else ""
+        what = self.br_body.get("1.0", "end-1c").strip() if hasattr(self, "br_body") else ""
+        if not title and not what:
+            self.br_status.configure(text="Add a short summary or describe what happened first.")
+            return
+        body = f"{what or '(no details given)'}\n\n---\n### Diagnostics\n```\n{self.report_diag()}\n```\n"
+        url = f"{REPO_URL}/issues/new?" + urlencode({"title": f"[{kind}] {title or 'Report'}", "body": body})
+        try:
+            webbrowser.open(url)
+            self.br_status.configure(text="Opened GitHub in your browser — review and press Submit.")
+        except Exception as e:
+            self.br_status.configure(text=f"Could not open a browser: {str(e)[:80]}")
+
+    def report_copy(self):
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(self.report_diag())
+            self.update_idletasks()
+            self.br_status.configure(text="Diagnostics copied to the clipboard.")
+        except Exception as e:
+            self.br_status.configure(text=f"Copy failed: {str(e)[:80]}")
 
     # ----- details (built once, filled in place: no flicker) -----
     # ----- randomizer -----
@@ -2863,7 +3632,10 @@ class App(ctk.CTk):
         self.d_title = ctk.CTkLabel(right, text="", font=("Segoe UI", 25, "bold"), text_color=SILVER_HI, wraplength=760, justify="left", anchor="w")
         self.d_title.pack(fill="x")
         self.d_src = ctk.CTkLabel(right, text="", text_color=MUTED, anchor="w")
-        self.d_src.pack(fill="x", pady=(0, 8))
+        self.d_src.pack(fill="x", pady=(0, 2))
+        self.d_genres = ctk.CTkLabel(right, text="", text_color=SILVER_DIM, font=("Segoe UI", 11),
+                                     anchor="w", wraplength=760, justify="left")
+        self.d_genres.pack(fill="x", pady=(0, 8))
         row = ctk.CTkFrame(right, fg_color="transparent")
         row.pack(fill="x", pady=4)
         self.d_bm = btn(row, "☆ Bookmark", self.toggle_bm, width=130)
@@ -2922,6 +3694,7 @@ class App(ctk.CTk):
         self.d_title.configure(text=m["title"])
         self.d_rate.configure(text="★ Rate")
         self.d_src.configure(text=src.name if src else m["source"])
+        self.d_genres.configure(text=genre_text(m.get("genres") or cached_genres(m), 8))
         self.d_desc.configure(text="Loading…")
         self.d_more.configure(text="")
         self.d_count.configure(text="")
@@ -2956,6 +3729,10 @@ class App(ctk.CTk):
         m = dict(m, title=info.get("title") or m["title"], cover=info.get("cover") or m["cover"])
         self.cur_detail = (m, info)
         self.d_title.configure(text=m["title"])
+        gs = info.get("genres") or m.get("genres") or cached_genres(m)
+        if gs:
+            remember_genres(m, gs)
+        self.d_genres.configure(text=genre_text(gs, 8))
         self.show_details_rating()
         if m.get("url"):
             self.d_bm.configure(state="normal", text=self.bm_text(m))
@@ -3260,7 +4037,12 @@ class App(ctk.CTk):
         self.r_zoom.configure(text="100%")
         self.r_page.configure(text="")
         self.build_body()
-        bg(lambda: cbz_pages(local) if local else src.pages(ch["url"]), lambda res, e: self.pages_ready(tok, res, e))
+        if local:
+            bg(lambda: cbz_pages(local), lambda res, e: self.pages_ready(tok, res, e))
+        elif isinstance(src, Source):
+            bg(lambda s=src: fetch_pages(s, ch["url"]), lambda res, e: self.pages_ready(tok, res, e))
+        else:
+            self.pages_ready(tok, [], "source not found")
 
     def pages_ready(self, tok, urls, err):
         if tok != self.rtok:
@@ -3277,7 +4059,7 @@ class App(ctk.CTk):
     def reader_ch_jump(self, label):
         """Chapter dropdown in the reader bar: jump straight to the picked chapter."""
         r, idx = self.reader, self._ch_map.get(label)
-        if r is None or idx is None or idx == r["idx"]:
+        if not r or idx is None or idx == r["idx"]:
             return
         self.open_chapter(r["m"], r["chs"], idx, nxt=idx > r["idx"])
 
@@ -3288,17 +4070,53 @@ class App(ctk.CTk):
             pass
         self.reader_ch_jump(lab)
 
-    def chs_menu_open(self):
-        """Scrollable chapter list under the reader-bar button.
+    @staticmethod
+    def _chapter_no(title):
+        """Normalised chapter number from a chapter title ('Chapter 1059', 'Ch. 2.5')."""
+        t = (title or "").strip()
+        m = re.search(r"(?i)(?:chapter|ch\.?|episode|ep\.?)\s*#?\s*(\d+(?:\.\d+)?)", t)
+        if m:
+            return m.group(1)
+        nums = re.findall(r"\d+(?:\.\d+)?", t)
+        return nums[-1] if nums else None
 
-        A header strip sits where the cursor is when the popup opens, so the release
-        half of the opening click cannot fall through onto a chapter row."""
+    def _chapter_jump_number(self, text, win, err):
+        """Jump to a typed chapter number; keep the popup open and show a small error."""
+        m = re.fullmatch(r"\s*(?:chapter|ch\.?|#)?\s*(\d+(?:\.\d+)?)\s*", text or "", re.I)
+        if not m:
+            err.configure(text="Enter a chapter number, e.g. 1059")
+            return
+        try:
+            target = float(m.group(1))
+        except ValueError:
+            err.configure(text="Enter a chapter number, e.g. 1059")
+            return
+        r = self.reader
+        if not r:
+            return
+        matches = []
+        for i, ch in enumerate(r["chs"]):
+            num = self._chapter_no(ch.get("title", ""))
+            try:
+                if num is not None and abs(float(num) - target) < 1e-6:
+                    matches.append(i)
+            except (TypeError, ValueError):
+                pass
+        if not matches:
+            err.configure(text=f"No Chapter {m.group(1)} in this title")
+            return
+        idx = min(matches, key=lambda i: abs(i - r["idx"]))
+        self._chs_pick(self._ch_labels[idx], win)
+
+    def chs_menu_open(self):
+        """Chapter picker with a direct number entry and a scrollable list."""
         labels = getattr(self, "_ch_labels", [])
         r = self.reader
-        if not labels or r is None:
+        if not labels or not r:
             return
         cur = r["idx"]
         win = tk.Toplevel(self)
+        win.withdraw()  # size/position while hidden; mapping first snapped it to 0,0
         win.overrideredirect(True)
         try:
             win.configure(bg=LINE)
@@ -3306,34 +4124,82 @@ class App(ctk.CTk):
             pass
         panel = ctk.CTkFrame(win, fg_color=PANEL, corner_radius=8, border_width=1, border_color=LINE)
         panel.pack(fill="both", expand=True, padx=1, pady=1)
-        # header doubles as a click-dead zone: it swallows the release, no chapter fires
-        ctk.CTkLabel(panel, text="Jump to chapter · scroll with the mouse wheel", height=32,
+
+        ctk.CTkLabel(panel, text="Jump to chapter", height=28,
                      font=("Segoe UI", 11, "bold"), text_color=MUTED, fg_color=CARD,
                      corner_radius=0).pack(fill="x", padx=(2, 2), pady=(2, 4))
-        rows = ctk.CTkScrollableFrame(panel, width=320, height=300, fg_color=PANEL)
-        rows.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        go = ctk.CTkFrame(panel, fg_color=PANEL)
+        go.pack(fill="x", padx=10, pady=(0, 2))
+        ctk.CTkLabel(go, text="Chapter", font=("Segoe UI", 11), text_color=TEXT).pack(side="left")
+        ent = ctk.CTkEntry(go, width=122, height=30, placeholder_text="number",
+                           font=("Segoe UI", 11))
+        ent.pack(side="left", padx=6)
+        err = ctk.CTkLabel(panel, text="", height=18, anchor="w",
+                           font=("Segoe UI", 10), text_color="#e06c75")
+        err.pack(fill="x", padx=12, pady=(0, 2))
+
+        def submit():
+            self._chapter_jump_number(ent.get(), win, err)
+            return "break"
+
+        btn(go, "Go", submit, primary=True, width=48, height=30).pack(side="left")
+        ent.bind("<Return>", lambda e: submit())
+
+        body = ctk.CTkFrame(panel, fg_color=PANEL)
+        body.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        # A real Listbox, not one button per chapter. Bleach/One Piece have 1000+
+        # chapters; building that many CTk widgets blocked Tk for seconds.
+        lb = tk.Listbox(body, bg=PANEL, fg=TEXT, selectbackground=BTN_HI, selectforeground=SILVER_HI,
+                        highlightthickness=0, borderwidth=0, relief="flat", exportselection=False,
+                        activestyle="none", font=("Segoe UI", 11))
+        sb = ctk.CTkScrollbar(body, command=lb.yview)
+        lb.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y", padx=(0, 4), pady=2)
+        lb.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=2)
         for i, lab in enumerate(labels):
-            row = ctk.CTkButton(rows,
-                                text=("\u25cf   " if i == cur else "      ") + lab,
-                                anchor="w", height=30, corner_radius=6, font=("Segoe UI", 11),
-                                fg_color=BTN_HI if i == cur else BTN,
-                                hover_color=BTN_HI,
-                                text_color=SILVER_HI if i == cur else TEXT,
-                                command=lambda l=lab, w=win: self._chs_pick(l, w))
-            row.pack(fill="x", padx=2, pady=1)
-        w = 360
-        hpx = min(len(labels) * 34 + 110, 520)
-        x = max(self.r_chs.winfo_rootx() - 180, 8)
-        y = self.r_chs.winfo_rooty() + self.r_chs.winfo_height() + 4
-        win.geometry(f"{w}x{hpx}+{x}+{y}")
-        win.lift()
-        win.grab_set()
-        # auto-scroll so the current chapter is in view, not chapter 1 of a 167-chapter list
+            lb.insert("end", ("\u25cf   " if i == cur else "      ") + lab)
         try:
-            frac = cur / max(1, len(labels) - 1)
-            rows._parent_canvas.yview_moveto(max(0.0, min(1.0, frac - 0.25)))
+            lb.selection_set(cur)
+            lb.activate(cur)
+            lb.see(max(0, cur - 4))
         except Exception:
             pass
+
+        def wheel(e):
+            lb.yview_scroll(-1 if e.delta > 0 else 1, "units")
+            return "break"
+
+        def pick(e):
+            i = lb.nearest(e.y)
+            if 0 <= i < len(labels):
+                self._chs_pick(labels[i], win)
+
+        lb.bind("<MouseWheel>", wheel)
+        lb.bind("<ButtonRelease-1>", pick)
+        win.bind("<MouseWheel>", wheel)
+
+        w = 400
+        hpx = min(170 + len(labels) * 22, 600)
+        self.update_idletasks()
+        bx, by = self.r_chs.winfo_rootx(), self.r_chs.winfo_rooty()
+        bw = max(self.r_chs.winfo_width(), 150)
+        bh = self.r_chs.winfo_height()
+        if bx <= 1:  # borderless/fullscreen can report 0 before the first layout pass
+            bx = self.winfo_rootx() + self.winfo_width() - w - 60
+        x = min(max(bx + bw - w, 8), max(8, self.winfo_screenwidth() - w - 8))
+        y = by + bh + 4
+        if y + hpx > self.winfo_screenheight() - 8:
+            y = max(8, by - hpx - 4)
+        win.geometry(f"{w}x{hpx}+{x}+{y}")
+        try:
+            win.attributes("-topmost", True)
+        except Exception:
+            pass
+        win.deiconify()
+        win.lift()
+        win.grab_set()
+        ent.focus_set()
+        ent.icursor("end")
         win.bind("<Escape>", lambda e: win.destroy())
 
         def outside(e):
@@ -3377,7 +4243,7 @@ class App(ctk.CTk):
         elif r["err"] or not r["urls"]:
             msg = f"Could not load pages: {r['err'] or 'none found'}"
         if msg:
-            ctk.CTkLabel(self.rbody, text=msg, font=("Segoe UI", 15), text_color=MUTED).pack(pady=80)
+            ctk.CTkLabel(self.rbody, text=msg, font=("Segoe UI", 15), text_color=reader_muted()).pack(pady=80)
             return
         self.update_idletasks()
         self.build_webtoon() if self.is_web() else self.build_paged()
@@ -3422,7 +4288,7 @@ class App(ctk.CTk):
         r, gen, n = self.reader, self.reader["gen"], len(self.reader["urls"])
         W = self.web_width()
         dims = self.wt_dims(r["urls"], W)
-        c = tk.Canvas(self.rbody, bg=(paper_avg(S("paper")) or READER_BG), highlightthickness=0,
+        c = tk.Canvas(self.rbody, bg=(paper_avg(S("reader_paper")) or READER_BG), highlightthickness=0,
                       yscrollincrement=1, xscrollincrement=1)
         vs = ctk.CTkScrollbar(self.rbody, command=c.yview, fg_color=READER_BG, button_color=BTN_HI, button_hover_color=SILVER_DIM)
         hs = ctk.CTkScrollbar(self.rbody, orientation="horizontal", command=c.xview, fg_color=READER_BG, button_color=BTN_HI,
@@ -3444,7 +4310,7 @@ class App(ctk.CTk):
             bd = c.create_rectangle(x - 1, y - 1, x + w + 1, y + h + 1, outline="#000000", width=3)
             it = c.create_image(x, y, anchor="nw", image=ph)
             tx = c.create_text(x + w / 2, y + h / 2, anchor="center", text=f"Page {i + 1}",
-                               fill=MUTED, font=("Segoe UI", 11))
+                               fill=reader_muted(), font=("Segoe UI", 11))
             c.tag_bind(it, "<Button-1>", lambda e, i=i: self.wt_retry(i))
             c.tag_bind(tx, "<Button-1>", lambda e, i=i: self.wt_retry(i))
             r["borders"].append(bd)
@@ -3500,7 +4366,7 @@ class App(ctk.CTk):
 
     def wt_make_tex(self, r, c, cw, ch):
         """(Re)build the pool of paper tiles that sit behind the pages, sized to the viewport."""
-        tex = paper_tile(self, S("paper"))
+        tex = paper_tile(self, S("reader_paper"))
         tiles = []
         if tex:
             ts = tex.width()
@@ -3749,7 +4615,7 @@ class App(ctk.CTk):
     # --- paged (single / double, LTR / RTL) ---
     def build_paged(self):
         r = self.reader
-        c = tk.Canvas(self.rbody, bg=(paper_avg(S("paper")) or READER_BG), highlightthickness=0)
+        c = tk.Canvas(self.rbody, bg=(paper_avg(S("reader_paper")) or READER_BG), highlightthickness=0)
         c.pack(fill="both", expand=True)
         r.update(c=c, imgs={}, req=set(), failed=set(), pan=[0, 0], ph=None, rkey=None, drag=None)
         r["restore"] = None
@@ -3821,7 +4687,7 @@ class App(ctk.CTk):
         self.r_page.configure(text=f"{sp[0] + 1}{'–' + str(sp[-1] + 1) if len(sp) > 1 else ''} / {n}")
         ims = [r["imgs"].get(i) for i in sp]
         c.delete("all")
-        tile = paper_tile(self, S("paper"))  # paper surface behind the pages
+        tile = paper_tile(self, S("reader_paper"))  # paper surface behind the pages
         if tile:
             ts = tile.width()
             for y in range(0, int(ch) + ts, ts):
@@ -3829,7 +4695,7 @@ class App(ctk.CTk):
                     c.create_image(x, y, anchor="nw", image=tile)
         if any(im is None for im in ims):
             failed = any(i in r["failed"] for i in sp)
-            c.create_text(cw / 2, ch / 2, text="Page failed to load — click to retry" if failed else "Loading…", fill=MUTED, font=("Segoe UI", 14))
+            c.create_text(cw / 2, ch / 2, text="Page failed to load — click to retry" if failed else "Loading…", fill=reader_muted(), font=("Segoe UI", 14))
             return
         rtl = self.is_rtl()
         pairs = list(zip(sp, ims))
@@ -3842,7 +4708,7 @@ class App(ctk.CTk):
             H = max(im.height for _, im in pairs)
             tw = sum(im.width * H / im.height for _, im in pairs)
             th = max(1, int(H * min(cw / max(1, tw + gap * (len(pairs) - 1)), ch / H) * r["zoom"]))
-            parts = [(pi, im.resize((max(1, int(im.width * th / im.height)), th), Image.LANCZOS)) for pi, im in pairs]
+            parts = [(pi, im.resize((max(1, int(im.width * th / im.height)), th), Image.Resampling.LANCZOS)) for pi, im in pairs]
             # the spread is laid on black: the gap between the halves becomes the page gutter
             out = Image.new("RGB", (sum(p.width for _, p in parts) + gap * (len(parts) - 1), th), (0, 0, 0))
             x, lays = 0, []
@@ -3862,7 +4728,7 @@ class App(ctk.CTk):
             return
         for pi, lx, lw in r["lays"]:  # thick black contour + page number per visible page
             c.create_rectangle(left + lx, top, left + lx + lw, top + h, outline="#000000", width=PAGE_BORDER)
-            c.create_text(left + lx + lw / 2, top + h - 14, text=str(pi + 1), fill=MUTED, font=("Segoe UI", 11))
+            c.create_text(left + lx + lw / 2, top + h - 14, text=str(pi + 1), fill=reader_muted(), font=("Segoe UI", 11))
         if len(r["lays"]) == 2:  # little binding mark in the middle of the gutter
             _, lx, lw = r["lays"][0]
             gx = left + lx + lw + gap / 2
@@ -3939,6 +4805,63 @@ class App(ctk.CTk):
     def _listbox_open(self):
         w = getattr(self, "_chs_open", None)
         return bool(w and w.winfo_exists())
+
+    def _scroll_canvas_at(self, e):
+        """The scrollable canvas under the pointer (CTk scroll frames or the reader)."""
+        try:
+            w = self.winfo_containing(e.x_root, e.y_root)
+        except Exception:
+            return None
+        while w is not None:
+            c = getattr(w, "_parent_canvas", None)
+            if c is not None:
+                return c
+            if isinstance(w, tk.Canvas):
+                try:
+                    if self.cur == "Reader" and w is (self.reader or {}).get("c"):
+                        if self.is_web():
+                            return w
+                    elif w.cget("yscrollcommand"):
+                        return w
+                except Exception:
+                    pass
+            if w is self:
+                break
+            w = getattr(w, "master", None)
+        return None
+
+    def mmb_press(self, e):
+        """Middle-button drag scrolls whatever list/grid is under the pointer."""
+        c = self._scroll_canvas_at(e)
+        if c is None:
+            return
+        try:
+            self._mmb = (c, e.y_root, c.yview()[0])
+            c.configure(cursor="sb_v_double_arrow")
+        except Exception:
+            self._mmb = None
+
+    def mmb_drag(self, e):
+        if not self._mmb:
+            return "break"
+        c, y0, frac = self._mmb
+        try:
+            box = c.bbox("all")
+            span = max(1, (box[3] - box[1]) if box else c.winfo_height())
+            c.yview_moveto(max(0.0, min(1.0, frac + (e.y_root - y0) / span)))
+        except Exception:
+            pass
+        return "break"
+
+    def mmb_release(self, _event=None):
+        if not self._mmb:
+            return
+        c = self._mmb[0]
+        try:
+            c.configure(cursor="")
+        except Exception:
+            pass
+        self._mmb = None
 
     def on_wheel(self, e):
         if self._listbox_open():
