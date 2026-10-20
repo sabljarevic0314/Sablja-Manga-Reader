@@ -8,7 +8,7 @@ a History section and progress tracking — plus a built-in random manga roll (R
 **It hosts no content.** Sablja Reader is only a client application. It does not host, store,
 upload or distribute any manga, and it ships with no copyrighted material. It reads pages from
 the sources you enable in `sources.json`, using the official API where one exists (for example
-MangaDex and Webtoons). Which sources you enable, and what you read or download from them, is
+WEBTOON). Which sources you enable, and what you read or download from them, is
 your decision and your responsibility — see [Legal notice](#legal-notice).
 
 ---
@@ -76,6 +76,11 @@ Your library, progress and cache in `dist\data` are left untouched.
 The left sidebar is your library — titles you have bookmarked, with folders and progress tracking.
 Open a chapter and read; your position is remembered per title.
 
+The window opens in borderless fullscreen by default. Press **F11** to toggle it, or turn
+*Settings → Window → Open in borderless fullscreen on start* off if you prefer a normal window.
+The custom minimize / fullscreen / close buttons appear only while the native title bar is hidden,
+so there are never two sets of controls.
+
 ### Reading modes
 
 Switch in Settings or per title in the details page:
@@ -85,6 +90,23 @@ Switch in Settings or per title in the details page:
 | Webtoon (vertical) | long vertical strips; pages are laid out as one continuous canvas |
 | Single · left→right / right→left | classic page-by-page |
 | Double · left→right / right→left | two-page spreads |
+
+Reader background is its own setting (*Settings > Reading > Reader background*) and starts on
+**Graphite matte**, independent of the app's Paper/Graphite theme.
+
+### Shuffle (inside a source)
+
+Every source page has a **Shuffle** button. It mixes the cards already loaded with a random
+listing page (where the source has pagination) and shows a fresh random selection; press it
+again for a different set. Scroll to the bottom to keep loading the normal listing.
+
+### Genres on cards
+
+Cards show a short genre/category line when the source exposes one directly on the
+listing card (WEBTOON, MangaHub, Zazamanga, ReadManga, MangaTown, FanFox's latest list), or when the
+genres were already cached from opening that title's details page. Cards never trigger
+extra page requests, so scrolling stays fast and sites are not hammered.
+Turn this off in *Settings > Sources > Show genres on cards*.
 
 ### Randomizer
 
@@ -100,6 +122,14 @@ stopped on — click a card to jump straight back in, right-click to remove a si
 *Clear history* for all of it. Don't want it in the sidebar? Turn it off in *Settings → Sidebar*
 (*Show the History section*); your reading positions are kept either way.
 
+### Reporting a bug
+
+*Settings → Report a bug / request a feature* has a short form (type, summary, what happened).
+**Open GitHub issue** opens a new issue in your browser with the text and a diagnostics block
+already filled in; you review it and press Submit. Nothing is sent automatically, and the
+diagnostics contain no library, history or reading data. **Copy diagnostics** puts the same
+block on your clipboard if you would rather paste it somewhere else.
+
 ### Downloads
 
 Chapters can be saved for personal offline reading from the details page (with a configurable delay
@@ -112,23 +142,50 @@ redistribute them.
 ## Sources
 
 `sources.json` is the one file to edit — a source is described by its listing/search/details/chapter
-selectors (or `api: mangadex` / `api: webtoons` for the official APIs). The app hot-reloads it
+selectors (or `api: webtoons` / `api: fanfox` for sources that need a custom
+adapter). Regular sources keep their file order in the app; every 18+ source is forced to the
+bottom (both in `sources.json` and by `rebuild_sources()`). The app hot-reloads it
 (*Settings → Reload sources.json*).
 
-**Sablja Reader does not endorse, operate or recommend any particular source.** The sources included
-with the app are limited to official public APIs. If you add other sources yourself, you are
-responsible for making sure you are allowed to access and read them: check the site's terms of
-service and the copyright status of what it offers, and prefer sources that are published with the
-rights holders' permission. Please keep your request rate low and respect `robots.txt` and any
-access restrictions a site applies.
+The file ships with worked examples: an official API (WEBTOON) and selector-based
+sources including **MangaHub**, **FanFox**, **MangaDoom**, **ReadManga** and **MangaTown**. FanFox
+hides chapter pages behind a packed-JS
+AJAX endpoint, so its `api: fanfox` adapter asks for each page and unpacks the response.
+Keep `curl_cffi` installed so sites that check the TLS fingerprint (such as MangaHub) can be
+read with a browser-like connection. A source can also set `request_delay` (seconds between
+page requests); HTTP 429 responses honour `Retry-After` and back off automatically. Sources
+change their HTML regularly; if one stops working, the selectors in `sources.json` are the
+first place to look.
 
-Some sources may ask you to sign in or supply cookies from your own browser session. Settings for
-this are in *Settings → Protected sources*; they are stored per source in `data\db.json` on your
-own computer and are never sent anywhere except to that source.
+MangaHub paginates its listing and reads the full chapter archive, not only the recent tab.
+MangaTown and MangaDoom also paginate their listings and expose their full chapter archives.
+MangaTown spreads a chapter
+across one URL per page, so its `page_urls` selector reads the page list and fetches those
+pages in parallel. Page downloads retry automatically before a failed page is shown.
+MangaDex is no longer bundled: its catalogue mixed languages and produced empty or broken
+entries, so it was removed from the source list.
+
+A source can define a top-level `tags` selector list for the details page. Listing blocks can
+also set their own `tags` selectors when the cards themselves show genres. The first selector
+that finds text wins, and the result is shown on the card and details page. If a listing emits
+broken local cover paths but the site has a working CDN copy, `cover_rewrite` (a list of
+`[regex, replacement]` pairs) fixes the card URL without an extra request.
+
+**Sablja Reader does not endorse, operate or recommend any particular source.** Some bundled
+sources are examples that scrape a public website; others use official APIs. If you add or use
+a source, you are responsible for making sure you are allowed to access and read it: check the
+site's terms of service and the copyright status of what it offers, and prefer sources that are
+published with the rights holders' permission. Please keep your request rate low and respect
+`robots.txt` and any access restrictions a site applies.
 
 Adding a source from scratch? `autoprobe.py` does a one-shot probe of a listing page and writes
 `autoprobe_<host>.txt` with the card / chapter / page selectors it detected - paste the URL as an
 argument or run it empty and type it in. Only use it on sites you are permitted to access.
+
+Download-only sites (for example comic DDL blogs that link to `.cbz`/`.cbr` files on file
+hosts) do not fit this reader model: they have no page images to page through and no chapter
+viewer. They would need a separate download/queue subsystem, and their content is usually not
+licensed — so they are not supported.
 
 ---
 

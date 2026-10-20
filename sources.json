@@ -1,19 +1,16 @@
 {
   "sources": [
     {
-      "id": "mangadex",
-      "name": "MangaDex",
-      "api": "mangadex",
-      "base_url": "https://mangadex.org",
-      "nsfw": false
-    },
-    {
       "id": "weebcentral",
       "name": "WeebCentral",
       "base_url": "https://weebcentral.com",
+      "request_delay": 0.15,
       "headers": {
         "HX-Request": "true"
       },
+      "tags": [
+        "a[href*='included_tag=']"
+      ],
       "popular": {
         "url": "/search/data?limit=32&offset={offset}&sort=Popularity&order=Descending&official=Any&anime=Any&adult=Any&display_mode=Full%20Display",
         "item": "article.bg-base-300",
@@ -46,6 +43,9 @@
       "id": "mangaread",
       "name": "MangaRead",
       "base_url": "https://www.mangaread.org",
+      "tags": [
+        ".genres-content a"
+      ],
       "popular": {
         "url": "/manga/page/{page}/?m_orderby=views",
         "item": "div.page-item-detail.manga",
@@ -79,6 +79,9 @@
       "id": "mangakatana",
       "name": "MangaKatana",
       "base_url": "https://mangakatana.com",
+      "tags": [
+        "li.d-row-small div.genres a"
+      ],
       "popular": {
         "url": "/manga/page/{page}",
         "item": "div.item",
@@ -118,6 +121,9 @@
       "id": "toonily",
       "name": "Toonily",
       "base_url": "https://toonily.com",
+      "tags": [
+        ".genres-content a"
+      ],
       "popular": {
         "url": "/page/{page}/",
         "item": "div.page-item-detail.manga",
@@ -153,12 +159,18 @@
       "id": "zazamanga",
       "name": "Zazamanga",
       "base_url": "https://www.zazamanga.com",
+      "tags": [
+        ".tags a"
+      ],
       "popular": {
         "url": "/manga/page/{page}/?m_orderby=views",
         "item": "div.page-item-detail.manga",
         "title": "div.post-title h3 a",
         "link": "div.post-title h3 a",
-        "cover": "img"
+        "cover": "img",
+        "tags": [
+          ".tags a"
+        ]
       },
       "latest": {
         "url": "/manga/page/{page}/?m_orderby=latest"
@@ -168,7 +180,10 @@
         "item": "div.c-tabs-item__content, div.page-item-detail.manga",
         "title": ".post-title h3 a, div.post-title h3 a",
         "link": ".post-title h3 a, div.post-title h3 a",
-        "cover": ".tab-thumb img, img"
+        "cover": ".tab-thumb img, img",
+        "tags": [
+          ".tags a"
+        ]
       },
       "details": {
         "title": "div.post-title h1, h1",
@@ -191,14 +206,277 @@
       "id": "webtoons",
       "name": "WEBTOON",
       "api": "webtoons",
+      "nsfw": false,
       "base_url": "https://www.webtoons.com",
-      "nsfw": false
+      "tags": [
+        ".info .genre"
+      ]
+    },
+    {
+      "id": "mangahub",
+      "name": "MangaHub",
+      "base_url": "https://mangahub.io",
+      "tags": [
+        "a.genre-label"
+      ],
+      "popular": {
+        "url": "/popular/page/{page}",
+        "item": "div.media",
+        "title": "h4 a",
+        "link": "h4 a",
+        "cover": "img.manga-thumb",
+        "cover_attr": [
+          "data-src",
+          "data-original",
+          "src"
+        ],
+        "tags": [
+          "a.genre-label"
+        ]
+      },
+      "search": {
+        "url": "/search?q={query}",
+        "item": "div.media",
+        "title": "h4 a",
+        "link": "h4 a",
+        "cover": "img.manga-thumb",
+        "cover_attr": [
+          "data-src",
+          "data-original",
+          "src"
+        ],
+        "single_page": true,
+        "tags": [
+          "a.genre-label"
+        ]
+      },
+      "details": {
+        "title": "h1",
+        "title_direct_text": true,
+        "description": "meta[name=description]",
+        "cover": "img.manga-thumb",
+        "cover_attr": [
+          "data-src",
+          "data-original",
+          "src"
+        ]
+      },
+      "chapters": {
+        "item": "div[id^='chapters-tab-pane-'] li a[href*='/chapter/']:has(small)",
+        "newest_first": true,
+        "title_pattern": "(?i)^(?:#\\s*)?(?:chapter\\s*)?(\\d+(?:\\.\\d+)?)",
+        "title_format": "Chapter {1}"
+      },
+      "pages": {
+        "image": "img[src*='mghcdn']",
+        "attr": [
+          "data-src",
+          "src"
+        ]
+      }
+    },
+    {
+      "id": "fanfox",
+      "name": "FanFox",
+      "api": "fanfox",
+      "base_url": "https://fanfox.net",
+      "tags": [
+        "p.detail-info-right-tag-list a"
+      ],
+      "popular": {
+        "url": "/directory/{page}.html",
+        "item": "div.manga-list-1 > ul > li",
+        "title": "p.manga-list-1-item-title a",
+        "link": "p.manga-list-1-item-title a",
+        "cover": "img.manga-list-1-cover"
+      },
+      "latest": {
+        "url": "/releases/{page}.html",
+        "item": "div.manga-list-4 > ul > li",
+        "title": "p.manga-list-4-item-title a",
+        "link": "p.manga-list-4-item-title a",
+        "cover": "img.manga-list-4-cover",
+        "tags": [
+          "p.manga-list-4-show-tag-list a"
+        ]
+      },
+      "search": {
+        "url": "/search?name={query}&stype=1&page={page}",
+        "item": "div.manga-list-4 > ul > li",
+        "title": "p.manga-list-4-item-title a",
+        "link": "p.manga-list-4-item-title a",
+        "cover": "img.manga-list-4-cover"
+      },
+      "details": {
+        "title": "p.detail-info-right-title span.detail-info-right-title-font",
+        "description": "meta[name=description]",
+        "cover": "div.detail-info-cover img"
+      },
+      "chapters": {
+        "item": "ul.detail-main-list li a",
+        "newest_first": true,
+        "title_pattern": "^(Ch\\.\\s*[\\d.]+)"
+      },
+      "pages": {}
+    },
+    {
+      "id": "mangadoom",
+      "name": "MangaDoom",
+      "base_url": "https://manga-doom.com",
+      "tags": [
+        ".manga-info .dl-horizontal a[href*='/category/']"
+      ],
+      "popular": {
+        "url": "/popular-manga?page={page}",
+        "item": "div.row.manga-list-style",
+        "title": "dt.manga-title a",
+        "link": "dt.manga-title a",
+        "title_attr": "title",
+        "cover": "img",
+        "cover_rewrite": [
+          [
+            "^https://manga-doom\\.com/pictures/(\\d+)/(.+)$",
+            "https://9giiu0g54k8c.redirectto.cc/s16/manga/\\1/\\2"
+          ],
+          [
+            "^https://manga-doom\\.com/pictures/no-cover\\.jpg$",
+            ""
+          ]
+        ],
+        "tags": [
+          "a[href*='/category/']"
+        ]
+      },
+      "search": {
+        "url": "/advanced-search?term={query}&page={page}",
+        "item": "div.row:has(dt.manga-title)",
+        "title": "dt.manga-title a",
+        "link": "dt.manga-title a",
+        "cover": "img",
+        "cover_rewrite": [
+          [
+            "^https://manga-doom\\.com/pictures/(\\d+)/(.+)$",
+            "https://9giiu0g54k8c.redirectto.cc/s16/manga/\\1/\\2"
+          ],
+          [
+            "^https://manga-doom\\.com/pictures/no-cover\\.jpg$",
+            ""
+          ]
+        ]
+      },
+      "details": {
+        "title": ".manga-info h5.widget-heading",
+        "description": ".manga-info .note p",
+        "cover": ".manga-info img"
+      },
+      "chapters": {
+        "item": ".chapter-list li a",
+        "newest_first": true,
+        "title_pattern": "^.*?\\s+-\\s+([\\d.]+)\\s+",
+        "title_format": "Chapter {1}"
+      },
+      "pages": {
+        "url_suffix": "/all-pages",
+        "image": ".layout-all-pages img.img-responsive"
+      }
+    },
+    {
+      "id": "readmanga",
+      "name": "ReadManga",
+      "base_url": "https://readmanga.cc",
+      "tags": [
+        "a[href*='/browse/genre/']"
+      ],
+      "popular": {
+        "url": "/browse?page={page}",
+        "item": "div.mb-4.grid.grid-cols-1.gap-8 > div",
+        "title": "h2",
+        "link": "a[title]",
+        "cover": "img",
+        "tags": [
+          "a[href*='/browse/genre/']"
+        ]
+      },
+      "latest": {
+        "url": "/browse/latest-manga?page={page}"
+      },
+      "search": {
+        "url": "/browse?title={query}&page={page}",
+        "item": "div.mb-4.grid.grid-cols-1.gap-8 > div",
+        "title": "h2",
+        "link": "a[title]",
+        "cover": "img",
+        "tags": [
+          "a[href*='/browse/genre/']"
+        ]
+      },
+      "details": {
+        "title": "h1",
+        "description": "p.text-justify",
+        "cover": "meta[property='og:image']"
+      },
+      "chapters": {
+        "item": "div.grid.max-h-140 a",
+        "newest_first": true,
+        "title_pattern": "^(Chapter\\s*[\\d.]+)",
+        "title_format": "{1}"
+      },
+      "pages": {
+        "image": "img[alt*=' page ']"
+      }
+    },
+    {
+      "id": "mangatown",
+      "name": "MangaTown",
+      "base_url": "https://www.mangatown.com",
+      "tags": [
+        ".detail_info a[href*='/directory/']"
+      ],
+      "popular": {
+        "url": "/hot/romance/{page}.htm",
+        "item": "ul.manga_pic_list > li",
+        "title": "p.title a",
+        "link": "p.title a",
+        "cover": "a.manga_cover img",
+        "tags": [
+          "p.keyWord a"
+        ]
+      },
+      "search": {
+        "url": "/search?name={query}",
+        "item": "ul.manga_pic_list > li",
+        "title": "p.title a",
+        "link": "p.title a",
+        "cover": "a.manga_cover img",
+        "single_page": true,
+        "tags": [
+          "p.keyWord a"
+        ]
+      },
+      "details": {
+        "title": "h1.title-top",
+        "description": "span#show",
+        "cover": "div.detail_info img"
+      },
+      "chapters": {
+        "item": ".chapter_list li a",
+        "newest_first": true,
+        "title_pattern": "^(.*?)\\s+([\\d.]+)\\s*$",
+        "title_format": "Chapter {2}"
+      },
+      "pages": {
+        "page_urls": "select[onchange*='location.href'] option",
+        "image": "#image"
+      }
     },
     {
       "id": "pornhwaz",
       "name": "Pornhwaz",
       "nsfw": true,
       "base_url": "https://www.pornhwaz.com",
+      "tags": [
+        ".genres-content a"
+      ],
       "popular": {
         "url": "/?paged={page}",
         "item": "div.page-item-detail",
@@ -235,6 +513,9 @@
       "name": "ManhwaUS",
       "nsfw": true,
       "base_url": "https://manhwaus.net",
+      "tags": [
+        "div.post-content_item a[href*='/genre/']"
+      ],
       "popular": {
         "url": "/genre/adult/?page={page}",
         "item": "div.page-item-detail",
@@ -271,6 +552,9 @@
       "name": "Manga18FX",
       "nsfw": true,
       "base_url": "https://manga18fx.com",
+      "tags": [
+        ".genres-content a"
+      ],
       "popular": {
         "url": "/?page={page}",
         "item": "div.page-item",
@@ -317,6 +601,10 @@
       "name": "Hentai18",
       "nsfw": true,
       "base_url": "https://hentai18.net",
+      "tags": [
+        "a.item-tag[href*='/tag/']",
+        "a.item-tag[href*='/category/']"
+      ],
       "popular": {
         "url": "/?page={page}",
         "item": "div.item",
@@ -356,6 +644,9 @@
       "name": "Hentai20",
       "nsfw": true,
       "base_url": "https://hentai20.lol",
+      "tags": [
+        "a[href*='/genre/'][rel='tag']"
+      ],
       "popular": {
         "url": "/?page={page}",
         "item": "div.latest-item",
