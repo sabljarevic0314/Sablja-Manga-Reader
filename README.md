@@ -1,6 +1,6 @@
 # Sablja Reader
 
-A desktop manga / manhwa / webtoon reader for Windows. Silver-on-graphite UI with a warm
+A desktop manga / manhwa / webtoon reader for Windows. Graphite UI with a warm
 *Paper* theme in **Settings → Background**, webtoon (vertical strip),
 single, double and right-to-left paged reading, a library with folders and bookmarks, downloads,
 a History section and progress tracking — plus a built-in random manga roll (Randomizer).
