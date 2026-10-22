@@ -37,6 +37,12 @@ What the installer does for you:
 Updating later: download the new `SabljaReader-Setup.exe` from the newest Release and run it —
 it refreshes the app files and keeps everything in `data\`.
 
+You can also let the app check for you: **Settings → Updates → Check for updates**. When a newer
+release exists you can read its notes and press **Download & install**. Automatic checks run at
+most once a day (and can be switched off). Before an update is installed, `db.json` is copied to
+`data\backups\`, so a bad update can never take your bookmarks with it. The installer makes its
+own `db-before-<version>.json` backup for manual installs too.
+
 ---
 
 ## Running from source (only for developers)
@@ -52,20 +58,48 @@ pip install -r requirements.txt
 python SabljaReader.py
 ```
 
+If PowerShell says *"running scripts is disabled on this system"*, allow local scripts for your
+user once and try again:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
 `curl_cffi` (a browser-compatible HTTP client) is included in `requirements.txt` as an optional
 extra; the app also runs without it.
+
+A source checkout keeps its **own** `data\` folder next to `SabljaReader.py`. That folder is
+separate from an installed copy's `%LOCALAPPDATA%\Programs\SabljaReader\data`, so copy `db.json`
+between them if you want both copies to share the same library.
 
 ---
 
 ## Building your own exe (optional, for developers)
 
 ```powershell
+pip install pyinstaller
 .\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
 ```
 
-This produces a single-file `dist\SabljaReader.exe` (with the app icon baked in) and copies
-`sources.json` next to it.
+`build.ps1` produces a single-file `dist\SabljaReader.exe` (with the app icon baked in) and copies
+`sources.json` next to it. `make_setup.ps1` wraps that into `dist\SabljaReader-Setup.exe` (it
+downloads a portable NSIS if `makensis` is not already installed).
 Your library, progress and cache in `dist\data` are left untouched.
+
+### Releasing on GitHub
+
+The workflow in `.github/workflows/release.yml` builds both files on a Windows runner and attaches
+`SabljaReader-Setup.exe` to the release. Bump `APP_VERSION` in `SabljaReader.py` (the setup script
+reads it automatically), then push a version tag:
+
+```powershell
+git tag 1.4
+git push origin 1.4
+```
+
+`v1.4` works too. The built-in updater compares the release tag with `APP_VERSION`, so keep the
+tag and the app version in sync (`1.4` and `1.4.0` compare as the same version).
 
 ---
 
@@ -90,6 +124,12 @@ Switch in Settings or per title in the details page:
 | Webtoon (vertical) | long vertical strips; pages are laid out as one continuous canvas |
 | Single · left→right / right→left | classic page-by-page |
 | Double · left→right / right→left | two-page spreads |
+
+**Middle-click auto-scroll:** middle-click anywhere to start scrolling, without holding or
+dragging. Click in the lower half to scroll down, the upper half to scroll up; the further
+the pointer sits from the middle of the view, the faster it goes, and moving back towards the
+middle slows it down smoothly. Middle-click again (or press **Esc**, scroll the wheel, or
+click normally) to stop. This is especially handy for long webtoon chapters.
 
 Reader background is its own setting (*Settings > Reading > Reader background*) and starts on
 **Graphite matte**, independent of the app's Paper/Graphite theme.
