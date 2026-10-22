@@ -8,14 +8,18 @@ Unicode true
 !include "MUI2.nsh"
 
 Name "Sablja Reader"
-!define APP_VERSION "1.3.0"
-VIProductVersion "1.3.0.0"
-VIFileVersion "1.3.0.0"
+; make_setup.ps1 passes the version from SabljaReader.py's APP_VERSION; this fallback is only
+; for running makensis directly.
+!ifndef APP_VERSION
+  !define APP_VERSION "1.4.0"
+!endif
+VIProductVersion "${APP_VERSION}.0"
+VIFileVersion "${APP_VERSION}.0"
 VIAddVersionKey "ProductName" "Sablja Reader"
 VIAddVersionKey "CompanyName" "Sablja Reader"
 VIAddVersionKey "FileDescription" "Sablja Reader Installer"
-VIAddVersionKey "FileVersion" "1.3.0.0"
-VIAddVersionKey "ProductVersion" "1.3.0.0"
+VIAddVersionKey "FileVersion" "${APP_VERSION}.0"
+VIAddVersionKey "ProductVersion" "${APP_VERSION}.0"
 VIAddVersionKey "LegalCopyright" "Sablja Reader"
 OutFile "..\dist\SabljaReader-Setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\SabljaReader"
@@ -44,13 +48,19 @@ Section "Sablja Reader" SecMain
   Sleep 500
 
   SetOutPath "$INSTDIR"
+  ; Keep a copy of the library before any app files are replaced. The data folder itself is
+  ; never deleted by the installer or the uninstaller - this is an extra safety net.
+  IfFileExists "$INSTDIR\data\db.json" 0 no_db_backup
+    CreateDirectory "$INSTDIR\data\backups"
+    CopyFiles /SILENT "$INSTDIR\data\db.json" "$INSTDIR\data\backups\db-before-${APP_VERSION}.json"
+  no_db_backup:
   File "..\dist\SabljaReader.exe"
   File "..\dist\sources.json"
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKCU "Software\SabljaReader" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayName" "Sablja Reader"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayVersion" "1.3.0"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayVersion" "${APP_VERSION}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "Publisher" "Sablja Reader"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "DisplayIcon" "$INSTDIR\SabljaReader.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "InstallLocation" "$INSTDIR"

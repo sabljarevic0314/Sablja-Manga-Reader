@@ -1,4 +1,4 @@
-import os, sys, json, re, time, hashlib, threading, queue, shutil, zipfile, random, html, io, math, base64, platform, webbrowser, traceback
+import os, sys, json, re, time, hashlib, threading, queue, shutil, zipfile, random, html, io, math, base64, platform, webbrowser, traceback, tempfile, subprocess
 from collections import OrderedDict
 from typing import Any, cast
 from urllib.parse import urljoin, quote_plus, urlencode, urlsplit
@@ -19,6 +19,7 @@ BASE = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.p
 DATA = os.path.join(BASE, "data")
 CACHE = os.path.join(DATA, "cache")
 DB_FILE = os.path.join(DATA, "db.json")
+UPDATE_STATE_FILE = os.path.join(DATA, "update.json")
 SRC_FILE = os.path.join(BASE, "sources.json")
 os.makedirs(CACHE, exist_ok=True)
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
@@ -76,10 +77,13 @@ DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
             "dl_dir": os.path.join(BASE, "downloads"), "nsfw": True,
             "paged_guides": True, "paper": "Graphite matte",
             "reader_paper": "Graphite matte",
-            "show_history": True, "start_fullscreen": True, "card_genres": True}
+            "show_history": True, "start_fullscreen": True, "card_genres": True,
+            "update_auto": True}
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 REPO_URL = "https://github.com/sabljarevic0314/Sablja-Manga-Reader"
+GITHUB_API = "https://api.github.com/repos/sabljarevic0314/Sablja-Manga-Reader/releases/latest"
+UPDATE_ASSET = "SabljaReader-Setup.exe"
 
 DL_VIEW_CHIP = "__downloaded__"
 
@@ -662,8 +666,33 @@ DB: dict[str, Any] = load_db()
 
 
 def save_db():
-    with open(DB_FILE, "w", encoding="utf-8") as f:
+    """Write atomically: a crash mid-save must never leave a truncated library behind."""
+    tmp = DB_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(DB, f, indent=1, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, DB_FILE)
+
+
+def load_update_state() -> dict:
+    """Update-check bookkeeping lives beside the library, not inside db.json."""
+    try:
+        with open(UPDATE_STATE_FILE, encoding="utf-8") as f:
+            state = json.load(f)
+        return state if isinstance(state, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_update_state(state: dict):
+    try:
+        tmp = UPDATE_STATE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=1)
+        os.replace(tmp, UPDATE_STATE_FILE)
+    except Exception:
+        pass
 
 
 def reader_muted():
@@ -1519,6 +1548,14 @@ WT_AHEAD = 3               # pages kept loaded below the viewport
 WT_BEHIND = 1              # ... and above it
 WT_KEEP = 1                # extra pages kept before an image is dropped from memory
 WT_MAX_PX = 14000000       # cap for one page's Tk image (~56 MB): tall strips are the memory hogs
+# Middle-click auto-scroll: the pointer's distance from the viewport centre sets direction and
+# speed, so a middle click in the lower half starts a slow downward scroll without any dragging.
+MMB_DEAD = 26              # px around the viewport centre where the view stands still
+MMB_MIN = 55.0             # px/s just outside the dead zone (slow reading speed)
+MMB_MAX = 1150.0           # px/s at the top/bottom edge of the viewport
+MMB_TICK = 16              # ms between auto-scroll frames
+MMB_TAU_UP = 0.16          # s - time constant while speeding up (snappy)
+MMB_TAU_DOWN = 0.42        # s - time constant while slowing down (soft landing)
 _PH = None
 
 
@@ -1557,6 +1594,90 @@ def bg(fn, cb, pool=None):
             res = (None, e)
         Q.put((cb, res))
     (pool or NET_POOL).submit(w)
+
+
+def version_key(v):
+    """'v1.4' / '1.4.0' -> (1, 4, 0), so release tags and APP_VERSION compare naturally."""
+    nums = [int(n) for n in re.findall(r"\d+", str(v or ""))][:3]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
+def running_installed():
+    """True only for the copy NSIS placed in its registered install folder (not a portable exe)."""
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\SabljaReader") as k:
+            folder = str(winreg.QueryValueEx(k, "InstallDir")[0])
+        return os.path.normcase(os.path.abspath(folder)) == os.path.normcase(os.path.abspath(BASE))
+    except Exception:
+        return False
+
+
+def fetch_latest_release():
+    """Latest public GitHub release, as a small dict the UI can render. Runs on a worker thread."""
+    r = requests.get(GITHUB_API, timeout=12,
+                     headers={"Accept": "application/vnd.github+json",
+                              "User-Agent": f"SabljaReader/{APP_VERSION}"})
+    r.raise_for_status()
+    j = r.json()
+    tag = str(j.get("tag_name") or "").strip()
+    asset = next((a for a in (j.get("assets") or [])
+                  if str(a.get("name") or "").lower() == UPDATE_ASSET.lower()), None)
+    return {"tag": tag,
+            "page": j.get("html_url") or f"{REPO_URL}/releases/latest",
+            "notes": str(j.get("body") or "").strip()[:4000],
+            "asset": asset or {}}
+
+
+def download_release_asset(info):
+    """Download the installer asset into %TEMP%, checking size and SHA-256 when GitHub provides them."""
+    asset = info.get("asset") or {}
+    url = str(asset.get("browser_download_url") or "")
+    if not url.startswith(f"{REPO_URL}/releases/download/"):
+        raise RuntimeError("unexpected download URL")
+    tag = re.sub(r"[^0-9A-Za-z._-]+", "_", str(info.get("tag") or "latest"))
+    dest = os.path.join(tempfile.gettempdir(), f"SabljaReader-Setup-{tag}.exe")
+    part = dest + ".part"
+    h = hashlib.sha256()
+    with requests.get(url, stream=True, timeout=120,
+                      headers={"User-Agent": f"SabljaReader/{APP_VERSION}"}) as r:
+        r.raise_for_status()
+        with open(part, "wb") as f:
+            for chunk in r.iter_content(1 << 16):
+                if chunk:
+                    f.write(chunk)
+                    h.update(chunk)
+    try:
+        size = os.path.getsize(part)
+        want = int(asset.get("size") or 0)
+        if want and size != want:
+            raise RuntimeError("download size does not match the release")
+        digest = str(asset.get("digest") or "")
+        if digest.startswith("sha256:") and h.hexdigest() != digest.split(":", 1)[1].lower():
+            raise RuntimeError("download checksum does not match the release")
+        os.replace(part, dest)
+    except Exception:
+        try:
+            os.remove(part)
+        except Exception:
+            pass
+        raise
+    return dest
+
+
+def backup_db():
+    """Timestamped db.json copy in data\\backups, used before every update install."""
+    try:
+        bdir = os.path.join(DATA, "backups")
+        os.makedirs(bdir, exist_ok=True)
+        name = f"db-{time.strftime('%Y%m%d-%H%M%S')}-v{APP_VERSION}.json"
+        dest = os.path.join(bdir, name)
+        shutil.copy2(DB_FILE, dest)
+        return dest
+    except Exception as e:
+        return str(e)
 
 
 def fetch_pages(src, url):
@@ -1887,7 +2008,10 @@ class App(ctk.CTk):
         self._grid_state: dict[Any, dict[str, Any]] = {}
         self._reflow_jobs: dict[str, Any] = {}
         self._side_job = None
-        self._mmb = None
+        self._mmb: dict[str, Any] | None = None
+        self._mmb_job = None
+        self._upd_busy = False
+        self._upd_win = None
         self.rand_mode, self._rand_open, self.rdm_tok = False, False, 0
         self.rand_hist, self.rand_i, self.rand_seen = [], -1, set()
         self._fresh, self._fresh_thr, self._fresh_last = {}, None, 0
@@ -1895,14 +2019,15 @@ class App(ctk.CTk):
         rebuild_sources()
         self.bind_all("<MouseWheel>", self.on_wheel, add="+")
         self.bind_all("<Button-2>", self.mmb_press, add="+")
-        self.bind_all("<B2-Motion>", self.mmb_drag, add="+")
-        self.bind_all("<ButtonRelease-2>", self.mmb_release, add="+")
+        self.bind_all("<Button-1>", self.mmb_click_stop, add="+")
+        self.bind_all("<Button-3>", self.mmb_click_stop, add="+")
         self.bind_all("<Key>", self.on_key, add="+")
         self.bind_all("<F11>", self.toggle_fullscreen, add="+")
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.build_ui()
         self.after(60, self.poll)
         self.after(500, self.watch)
+        self.after(3000, lambda: self.check_updates())
 
     def start_fullscreen(self):
         self.set_borderless(True, save_geom=False)
@@ -2094,6 +2219,7 @@ class App(ctk.CTk):
 
     def show(self, name):
         if self.cur == "Reader" and name != "Reader":
+            self.mmb_stop()
             self.save_reader()
             self.rtok += 1
             self.rgen += 1
@@ -3321,6 +3447,27 @@ class App(ctk.CTk):
             self.sw_fs.select()
         ctk.CTkFrame(f, height=8, fg_color="transparent").pack()
 
+        f = card("Updates")
+        r = row(f)
+        ctk.CTkLabel(r, text=f"Installed version: {APP_VERSION}", text_color=TEXT, width=190,
+                     anchor="w").pack(side="left")
+        btn(r, "Check for updates", lambda: self.check_updates(True), width=150).pack(side="left")
+        self.upd_status = ctk.CTkLabel(r, text="", text_color=MUTED, anchor="w")
+        self.upd_status.pack(side="left", padx=10)
+        r = row(f)
+        self.sw_upd = ctk.CTkSwitch(r, text="Check for updates automatically on start (once a day)",
+                                    progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
+                                    command=lambda: self.setv("update_auto", bool(self.sw_upd.get())))
+        self.sw_upd.pack(side="left")
+        if S("update_auto"):
+            self.sw_upd.select()
+        btn(r, "Release page", lambda: self.open_release({}), width=120).pack(side="left", padx=(18, 0))
+        ctk.CTkLabel(f, text="Updates come from this project's GitHub releases. The installer replaces only the "
+                             "app files - your library, progress, cache and downloads stay in the data folder, "
+                             "and db.json is backed up before every update.",
+                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
+                     justify="left").pack(fill="x", padx=16, pady=(4, 12))
+
         f = card("Report a bug / request a feature")
         r = row(f)
         ctk.CTkLabel(r, text="Type", text_color=TEXT, width=190, anchor="w").pack(side="left")
@@ -3495,6 +3642,189 @@ class App(ctk.CTk):
         shutil.rmtree(CACHE, ignore_errors=True)
         os.makedirs(CACHE, exist_ok=True)
         self.repo_status.configure(text="Image cache cleared")
+
+    # ----- updates -----
+    def _upd_status(self, text):
+        """Write to the Settings update label if it is still on screen (theme rebuilds replace it)."""
+        try:
+            w = getattr(self, "upd_status", None)
+            if w is not None and w.winfo_exists():
+                w.configure(text=text)
+        except Exception:
+            pass
+
+    def check_updates(self, manual=False):
+        """Ask GitHub for the latest release. Manual checks always run; automatic ones once a day."""
+        if self._upd_busy:
+            return
+        if not manual:
+            if not S("update_auto"):
+                return
+            last = float(load_update_state().get("checked") or 0)
+            if time.time() - last < 86400:
+                return
+        self._upd_busy = True
+        if manual:
+            self._upd_status("Checking GitHub…")
+        bg(fetch_latest_release, lambda info, err: self.on_update_info(manual, info, err))
+
+    def on_update_info(self, manual, info, err):
+        self._upd_busy = False
+        state = load_update_state()
+        state["checked"] = time.time()
+        save_update_state(state)
+        if err or not info:
+            if manual:
+                self._upd_status(f"Update check failed: {str(err or 'no response')[:110]}")
+            return
+        tag = str(info.get("tag") or "").strip()
+        if not tag:
+            if manual:
+                self._upd_status("GitHub returned no release tag.")
+            return
+        if version_key(tag) <= version_key(APP_VERSION):
+            if manual:
+                self._upd_status(f"You are up to date (version {APP_VERSION}).")
+            return
+        if not manual and load_update_state().get("skip") == tag:
+            return
+        self.show_update(info)
+
+    def open_release(self, info=None):
+        page = str((info or {}).get("page") or f"{REPO_URL}/releases/latest")
+        try:
+            webbrowser.open(page)
+            self._upd_status("Opened the release page in your browser.")
+        except Exception as e:
+            self._upd_status(f"Could not open a browser: {str(e)[:80]}")
+
+    def show_update(self, info):
+        tag = str(info.get("tag") or "").strip()
+        old = self._upd_win
+        if old is not None:
+            try:
+                if old.winfo_exists():
+                    old.destroy()
+            except Exception:
+                pass
+        win = tk.Toplevel(self)
+        self._upd_win = win
+        win.title("Sablja Reader update")
+        win.configure(bg=BG)
+        win.resizable(False, False)
+        win.transient(self)
+        panel = ctk.CTkFrame(win, fg_color=PANEL, corner_radius=0)
+        panel.pack(fill="both", expand=True)
+        ctk.CTkLabel(panel, text=f"Version {tag.lstrip('vV')} is available",
+                     font=("Segoe UI", 16, "bold"), text_color=SILVER_HI).pack(anchor="w", padx=20, pady=(18, 2))
+        ctk.CTkLabel(panel, text=f"You have {APP_VERSION}.", text_color=MUTED,
+                     font=("Segoe UI", 11)).pack(anchor="w", padx=20)
+        notes = (info.get("notes") or "").strip()
+        if notes:
+            tb = ctk.CTkTextbox(panel, height=150, fg_color=CARD, border_color=LINE, border_width=1,
+                                text_color=TEXT, font=("Segoe UI", 11), corner_radius=8, wrap="word")
+            tb.pack(fill="both", expand=True, padx=20, pady=10)
+            tb.insert("1.0", notes[:3000])
+            tb.configure(state="disabled")
+        else:
+            ctk.CTkLabel(panel, text="See the release page for what changed.",
+                         text_color=MUTED).pack(anchor="w", padx=20, pady=10)
+        row = ctk.CTkFrame(panel, fg_color="transparent")
+        row.pack(fill="x", padx=20, pady=(0, 8))
+        frozen = bool(getattr(sys, "frozen", False))
+        installed = running_installed()
+        can_install = installed and bool((info.get("asset") or {}).get("browser_download_url"))
+        if can_install:
+            btn(row, "Download & install", lambda: self.update_install(info), primary=True,
+                width=160).pack(side="left")
+            btn(row, "Release page", lambda: self.open_release(info), width=120).pack(side="left", padx=8)
+        else:
+            btn(row, "Open release page", lambda: self.open_release(info), primary=True,
+                width=160).pack(side="left")
+        btn(row, "Later", lambda: self.update_later(info, win), width=90).pack(side="right")
+        if can_install:
+            note = (f"Your library, progress, cache and downloads stay in {DATA}. "
+                    "db.json is backed up to data\\backups before the installer runs.")
+        elif not frozen:
+            note = ("This is a source checkout, so the updater only opens the release page. "
+                    f"Your data folder is {DATA}.")
+        elif not installed:
+            note = ("This is a portable copy, so it will not overwrite an installed copy. "
+                    f"Download the installer from the release page; this data folder stays at {DATA}.")
+        else:
+            note = "The release has no installer asset; open the release page to download it."
+        ctk.CTkLabel(panel, text=note, text_color=MUTED, font=("Segoe UI", 11),
+                     wraplength=520, justify="left").pack(fill="x", padx=20, pady=(0, 14))
+        win.protocol("WM_DELETE_WINDOW", lambda: self.update_later(info, win))
+        win.update_idletasks()
+        w, h = 560, max(320, win.winfo_reqheight())
+        x = self.winfo_rootx() + max(0, (self.winfo_width() - w) // 2)
+        y = self.winfo_rooty() + max(0, (self.winfo_height() - h) // 3)
+        win.geometry(f"{w}x{h}+{x}+{y}")
+        try:
+            win.attributes("-topmost", True)
+        except Exception:
+            pass
+        win.grab_set()
+        win.lift()
+        win.after(60, win.focus_force)
+        self._upd_status(f"Version {tag.lstrip('vV')} is available.")
+
+    def update_later(self, info, win):
+        tag = str(info.get("tag") or "").strip()
+        if tag:
+            state = load_update_state()
+            state["skip"] = tag
+            save_update_state(state)
+        try:
+            win.destroy()
+        except Exception:
+            pass
+        if self._upd_win is win:
+            self._upd_win = None
+        self._upd_status("Update skipped. You can check again any time.")
+
+    def update_install(self, info):
+        tag = str(info.get("tag") or "").strip().lstrip("vV")
+        ok = messagebox.askyesno(
+            "Install update",
+            f"Download version {tag} and run the installer now?\n\n"
+            f"Your library and progress stay in:\n{DATA}\n\n"
+            "A backup of db.json is saved to data\\backups first.\n"
+            "Sablja Reader will close while the installer runs.")
+        if not ok:
+            return
+        win = self._upd_win
+        if win is not None:
+            try:
+                win.destroy()
+            except Exception:
+                pass
+            self._upd_win = None
+        self._upd_status("Downloading the update…")
+        bg(lambda: download_release_asset(info), lambda path, err: self.on_update_downloaded(path, err))
+
+    def on_update_downloaded(self, path, err):
+        if err or not path:
+            self._upd_status(f"Update download failed: {str(err or 'no file')[:110]}")
+            messagebox.showerror("Update failed", f"Could not download the update.\n\n{err or 'no file'}")
+            return
+        backup = backup_db()
+        self._upd_status("Starting the installer…")
+        try:
+            os.startfile(path)
+        except Exception:
+            try:
+                subprocess.Popen([path])
+            except Exception as e:
+                self._upd_status(f"Could not start the installer: {str(e)[:100]}")
+                messagebox.showerror("Update failed", f"Could not start the installer.\n\n{e}\n\nFile: {path}")
+                return
+        if os.path.isfile(str(backup)):
+            self._upd_status(f"Installer started. Library backup: {backup}")
+        else:
+            self._upd_status("Installer started; the app will close in a moment.")
+        self.after(900, self.close)
 
     # ----- bug report -----
     def report_diag(self):
@@ -4110,6 +4440,7 @@ class App(ctk.CTk):
 
     def chs_menu_open(self):
         """Chapter picker with a direct number entry and a scrollable list."""
+        self.mmb_stop()
         labels = getattr(self, "_ch_labels", [])
         r = self.reader
         if not labels or not r:
@@ -4231,6 +4562,7 @@ class App(ctk.CTk):
 
     def build_body(self):
         r = self.reader
+        self.mmb_stop()
         self.rgen += 1
         r["gen"] = self.rgen
         for k in ("c", "labels", "items", "texts", "photos", "nextbtn", "ys", "total", "cw",
@@ -4830,40 +5162,131 @@ class App(ctk.CTk):
             w = getattr(w, "master", None)
         return None
 
+    def _canvas_metrics(self, c):
+        """(scrollregion top, scrollregion height, viewport height) for a canvas."""
+        y0 = total = 0.0
+        try:
+            vals = [float(v) for v in str(c.cget("scrollregion")).split()]
+            if len(vals) == 4:
+                y0, total = vals[1], vals[3] - vals[1]
+        except Exception:
+            pass
+        if total <= 0:
+            try:
+                box = c.bbox("all")
+            except Exception:
+                box = None
+            if box:
+                y0, total = box[1], box[3] - box[1]
+        if total <= 0:
+            return None
+        return y0, total, max(1, c.winfo_height())
+
+    def _scroll_px(self, c, dy):
+        """Scroll a canvas by a pixel amount, independent of the widget's unit settings."""
+        if not dy:
+            return 0.0
+        m = self._canvas_metrics(c)
+        if m is None:
+            return 0.0
+        y0, total, vh = m
+        try:
+            top = c.canvasy(0) - y0
+        except Exception:
+            return 0.0
+        new = max(0.0, min(max(0.0, total - vh), top + dy))
+        if abs(new - top) < 0.01:
+            return 0.0
+        try:
+            c.yview_moveto(new / total)
+        except Exception:
+            return 0.0
+        return new - top
+
     def mmb_press(self, e):
-        """Middle-button drag scrolls whatever list/grid is under the pointer."""
+        """Middle click toggles auto-scroll: no dragging, click again to stop.
+
+        Direction and speed follow the pointer's distance from the viewport centre, so a click
+        in the lower half starts a slow downward scroll immediately. Moving further down (or
+        up) speeds it up; moving back towards the middle slows it down again.
+        """
+        if self._mmb:
+            self.mmb_stop()
+            return "break"
         c = self._scroll_canvas_at(e)
         if c is None:
             return
+        m = self._canvas_metrics(c)
+        if m is None or m[1] <= m[2] + 1:   # nothing to scroll
+            return
+        self._mmb = {"c": c, "v": 0.0, "last": time.perf_counter()}
         try:
-            self._mmb = (c, e.y_root, c.yview()[0])
             c.configure(cursor="sb_v_double_arrow")
         except Exception:
-            self._mmb = None
-
-    def mmb_drag(self, e):
-        if not self._mmb:
-            return "break"
-        c, y0, frac = self._mmb
-        try:
-            box = c.bbox("all")
-            span = max(1, (box[3] - box[1]) if box else c.winfo_height())
-            c.yview_moveto(max(0.0, min(1.0, frac + (e.y_root - y0) / span)))
-        except Exception:
             pass
+        self._mmb_job = self.after(MMB_TICK, self.mmb_tick)
         return "break"
 
-    def mmb_release(self, _event=None):
-        if not self._mmb:
+    def mmb_click_stop(self, _event=None):
+        """A normal click anywhere ends auto-scroll (the button's own action still runs)."""
+        if self._mmb:
+            self.mmb_stop()
+
+    def mmb_tick(self):
+        st = self._mmb
+        if not st:
+            self._mmb_job = None
             return
-        c = self._mmb[0]
+        now = time.perf_counter()
+        dt = min(0.08, max(0.001, now - st["last"]))
+        st["last"] = now
+        c = st["c"]
         try:
-            c.configure(cursor="")
+            if not c.winfo_exists():
+                self.mmb_stop()
+                return
+            ch = max(1, c.winfo_height())
+            cy = c.winfo_rooty() + ch / 2.0
+            off = self.winfo_pointery() - cy
+            half = max(80.0, ch / 2.0)
         except Exception:
-            pass
-        self._mmb = None
+            self.mmb_stop()
+            return
+        if abs(off) <= MMB_DEAD:
+            target = 0.0
+        else:
+            k = min(1.0, (abs(off) - MMB_DEAD) / max(1.0, half - MMB_DEAD))
+            target = (MMB_MIN + (MMB_MAX - MMB_MIN) * (k ** 1.7)) * (1.0 if off > 0 else -1.0)
+        # Ease towards the target speed: quick to react, gentle when slowing back down, so
+        # webtoon pages never jerk to a halt the moment the pointer crosses the centre.
+        tau = MMB_TAU_UP if abs(target) > abs(st["v"]) else MMB_TAU_DOWN
+        st["v"] += (target - st["v"]) * (1.0 - math.exp(-dt / tau))
+        if target == 0.0 and abs(st["v"]) < 0.5:
+            st["v"] = 0.0
+        self._scroll_px(c, st["v"] * dt)
+        self._mmb_job = self.after(MMB_TICK, self.mmb_tick)
+
+    def mmb_stop(self, _event=None):
+        st, self._mmb = self._mmb, None
+        if self._mmb_job:
+            try:
+                self.after_cancel(self._mmb_job)
+            except Exception:
+                pass
+            self._mmb_job = None
+        if not st:
+            return
+        c = st.get("c")
+        if c is not None:
+            try:
+                if c.winfo_exists():
+                    c.configure(cursor="")
+            except Exception:
+                pass
 
     def on_wheel(self, e):
+        if self._mmb:
+            self.mmb_stop()
         if self._listbox_open():
             return
         r = self.reader
@@ -4887,6 +5310,10 @@ class App(ctk.CTk):
             if e.keysym == "Escape":
                 self._chs_open.destroy()
             return
+        if self._mmb:
+            self.mmb_stop()          # any keyboard input takes back manual control
+            if e.keysym == "Escape":
+                return
         r = self.reader
         if self.cur != "Reader" or not r or "c" not in r:
             return
