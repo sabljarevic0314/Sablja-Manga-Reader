@@ -3,6 +3,28 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## 1.4.1 — 2026-10-29
+
+### Fixed / faster
+
+- **Webtoon scrolling with very tall pages** no longer stutters or spikes memory: a page taller
+  than 1,000 px is split into stacked strips, built two per frame, so a huge page never blocks
+  the scroll.
+- **Page and cover loading** keeps more pages ahead (6 in flight, 5 ahead in webtoon mode), so
+  fast scrolling no longer waits on an empty screen.
+- **Saving** (`db.json`) is debounced and only writes when something actually changed, which
+  removes small freezes while reading, bookmarking and browsing.
+- **HTML parsing** uses `lxml` when available, falling back to the built-in parser.
+- **Image cache** is trimmed automatically (1.5 GB cap) and failed page loads are logged to
+  `data\errors.log` instead of failing silently.
+
+### Changed
+
+- The old unused icon generator was removed; the app icon is built from the bundled logo.
+- Internal code split into modules (`config`, `storage`, `sources`, `downloads`, `textures`,
+  `assets`). Behaviour is unchanged; `SabljaReader.py` is still the entry point.
+- Version bumped to **1.4.1**.
+
 ## 1.4.0 — 2026-10-23
 
 ### Added

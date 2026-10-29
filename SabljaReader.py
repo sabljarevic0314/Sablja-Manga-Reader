@@ -1,38 +1,26 @@
-import os, sys, json, re, time, hashlib, threading, queue, shutil, zipfile, random, html, io, math, base64, platform, webbrowser, traceback, tempfile, subprocess
-from collections import OrderedDict
+import os, sys, re, time, hashlib, threading, queue, shutil, zipfile, random, io, math, platform, webbrowser, traceback, tempfile, subprocess
 from typing import Any, cast
-from urllib.parse import urljoin, quote_plus, urlencode, urlsplit
-from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlencode
 import requests
-from bs4 import BeautifulSoup
-from PIL import Image, ImageOps, ImageTk, ImageDraw, ImageFont, ImageFilter, ImageChops, ImageStat
+from PIL import Image, ImageTk
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import customtkinter as ctk
 
-try:  # real Chrome/Firefox TLS fingerprint (bypasses many 403s)
-    from curl_cffi import requests as cffi
-except Exception:
-    cffi = None
-
-BASE = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
-DATA = os.path.join(BASE, "data")
-CACHE = os.path.join(DATA, "cache")
-DB_FILE = os.path.join(DATA, "db.json")
-UPDATE_STATE_FILE = os.path.join(DATA, "update.json")
-SRC_FILE = os.path.join(BASE, "sources.json")
-os.makedirs(CACHE, exist_ok=True)
-UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9"}
-IMG_ATTRS = ["data-src", "lazy-src", "data-original", "data-lazy-src", "src"]
-PAGE_SIZE = 32
-# Card sizes (logical px). Bigger covers = fewer widgets on screen = smoother scrolling.
-CARD_W, CARD_H = 212, 300
-SMALL_W, SMALL_H = 128, 181          # search-result cards
-CARD_CELL = CARD_W + 24              # card + frame margin + 2*6 grid padding
-SMALL_CELL = SMALL_W + 24
-MD_API = "https://api.mangadex.org"
+from assets import make_icon, make_icon_file
+from textures import paper_tile, paper_avg
+from config import (BASE, DATA, CACHE, SRC_FILE,
+                    CARD_W, CARD_H, SMALL_W, SMALL_H, CARD_CELL,
+                    SMALL_CELL, MODES, ZOOMS, PAPERS, APP_VERSION,
+                    PAGE_BORDER, PAGE_GAP, REPO_URL, GITHUB_API, UPDATE_ASSET)
+from storage import (DB, S, save_db, save_db_soon, log_error, load_update_state,
+                     save_update_state, pkey, cached_genres, remember_genres,
+                     cache_path, prune_cache, dl_records, backup_db)
+from sources import (SOURCES, Source, LOCAL, rebuild_sources, fetch_pages, load_img, bg,
+                     cffi, Q, PAGE_POOL, THUMB_CACHE, THUMB_LOCK, cbz_pages, source_hidden,
+                     hidden_ids, get_rating, dl_folder_for, local_chapters, local_chapters_any,
+                     local_path, downloaded_manga)
+from downloads import DL_Q, JOBS, dl_path, next_job_id
 
 # ---------------- theme (silver on graphite) ----------------
 # The chrome colours follow the chosen background, so the flat menu areas sit on the
@@ -65,562 +53,9 @@ SILVER, SILVER_HI, SILVER_DIM, INK = "#c5cad3", "#e8ebf0", "#7d838e", "#14151a"
 TEXT, MUTED, READER_BG = "#e7e9ed", "#8a8f99", "#1a1b1f"
 FONT = ("Segoe UI", 12)
 
-MODES = ["Webtoon (vertical)", "Single · left→right", "Single · right→left", "Double · left→right", "Double · right→left"]
-ZOOMS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
-# paper textures (the "hardback" look) - the names are what Settings shows
-PAPERS = ["Off", "Graphite matte", "Ink matte", "Paper"]
-PAPER_RGB = {"Graphite matte": (41, 42, 46), "Ink matte": (23, 24, 27), "Paper": (226, 219, 200)}
-PAPER_KIND = {"Graphite matte": "matte", "Ink matte": "matte", "Paper": "matte"}
-PAGE_BORDER = 5     # black contour drawn around a page in the paged modes
-PAGE_GAP = 16       # black gutter between the two halves of a double spread
-DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
-            "dl_dir": os.path.join(BASE, "downloads"), "nsfw": True,
-            "paged_guides": True, "paper": "Graphite matte",
-            "reader_paper": "Graphite matte",
-            "show_history": True, "start_fullscreen": True, "card_genres": True,
-            "update_auto": True}
 
-APP_VERSION = "1.4.0"
-REPO_URL = "https://github.com/sabljarevic0314/Sablja-Manga-Reader"
-GITHUB_API = "https://api.github.com/repos/sabljarevic0314/Sablja-Manga-Reader/releases/latest"
-UPDATE_ASSET = "SabljaReader-Setup.exe"
 
 DL_VIEW_CHIP = "__downloaded__"
-
-
-def _rot(pts, deg, cx, cy):
-    a = math.radians(deg)
-    ca, sa = math.cos(a), math.sin(a)
-    return [(cx + x * ca - y * sa, cy + x * sa + y * ca) for x, y in pts]
-
-
-LOGO_B64 = (
-    "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"
-    "7Wa+wzLrr5RpushDt4SmI12jDZ1SOOIuGIUwUWoJ6UaT9LugWra9nFLziLZhco4fphbwymExaYRyIxTbcio3EBPRZEcuYE9qnMK7rTMSTPFm7m"
-    "CRtbKiUJms6jQuSnFo6CDrURDkE5VNEKG2BZ/YKLyLkBXdKFnxIiJhKdfwUUvKPp5vUecp/IydSQwz+FtsZpr1DBq5ZJ/wlWuIaLuxJDXT5etO"
-    "BJCFJq7iH0riddop9WLqeRlMnsG+rvB7nmdIKx7d1hYXXibVLuGsZzOa4812arGKc3k6kh/yLgu5f5wrWE7D4B/u3ECXpF4Ovv1ZqN2Pr+7cG9"
-    "j9KzxHW1dgbNpR3EzYhlM5k5iIj3Ii8Fx+xkJaRGjqrOfXCI7lZdxLbMDevKqnjcBs0Q1pJyLIOhpkSa9QBwInUWqU8FtBU7O5lQkFhdObgCV6"
-    "KmfUbGpZi5nrSaizmgM5joSbuN1kVE0W8TNeTMRZvANFjZM4iW1IbMFJFCRxXIXQ8LHU3lSV8EEusgVi4ZQoq/Sm/UqgX/7xp37pwm8Lp/yiTP"
-    "Q+n0/xBH7MaWhewqkMoAz/XXAHk4zwalbyALczSmIlo4Q928Ib/yCcEZHK6bNXpSsv9z/ncjjaiZI1uZSbLsBj2su3tT2dkqLMTXsQRbvet5Gd"
-    "+Bbr+TbruIGdLNVlkDN5KxfzE+A1fJ5Fpq1LBdpJ8wqADgZ4OtAA6o/Cza2UmzZKPOyvs7qEO1a5GASGNXzzLoJ8LEvMNAfzAxocxPcZsEi4AO"
-    "5mgqXMYZBTGGacuuHMSDsgJWf4CKs47DaCqIqyZ5VgVS75mHGQ8v587Ymu+l1LbvuJdFpBpQn/sn/XmKTOKQwxzDY0WON0V7RT4GNIOI9XmGKz"
-    "9pZf4ysoKEIapNLhVeggFxKP0ue2AMoinVF0Mf66RDjQXYJIZaP+rNegnxrjvJYzqXsnGjYjWcNlwA6cQcKETfNwBGKymli+vejIfPXRu3KMkl"
-    "NMlIP3pd4Qeqxryesjbv6hHLQtNcwmBYwzxVnsDvyKOxkKjLY5gfcwTZ9pkJOFsZi5+Jx2EtJcYVl7zzcU8AlniEa5+iFdzkhnsaQ8VfTPHMEu"
-    "dNdAqVIH/mrew6koSwzNfn8edYZ4P78Dnsp32GTPlt8rnNrKXexV61TgQWiH7VQFkeBYGOGQP5XtRsgynYzNkNqBre74amV6BzNr12Kc7/As4G"
-    "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"
-    "8O+qAAAAAElFTkSuQmCC"
-)
-_LOGO: list[Image.Image | None] = [None]
-
-
-def make_icon(size=256):
-    """App logo (the crossed-sabres SR badge); falls back to the old drawn logo if decoding fails."""
-    try:
-        im = _LOGO[0]
-        if im is None:
-            im = Image.open(io.BytesIO(base64.b64decode("".join(LOGO_B64)))).convert("RGBA")
-            _LOGO[0] = im
-        return im.copy() if size == im.width else im.resize((size, size), Image.Resampling.LANCZOS)
-    except Exception:
-        return _make_icon_old(size)
-
-
-def _make_icon_old(size=256):
-    """Old logo: the letters SR with a sabre ("sablja") lying underneath them."""
-    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    d.rounded_rectangle((0, 0, size - 1, size - 1), radius=size // 5, fill=(12, 13, 17, 255))
-    font = None
-    for n in ("arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf", "Arial Bold.ttf"):
-        try:
-            font = ImageFont.truetype(n, int(size * 0.42))
-            break
-        except Exception:
-            pass
-    try:  # lettering, lifted a little to leave room for the sword
-        d.text((size / 2, size * 0.35), "SR", font=font, fill=(228, 232, 239, 255), anchor="mm",
-               stroke_width=max(1, size // 60), stroke_fill=(228, 232, 239, 255))
-    except Exception:
-        d.text((size * 0.26, size * 0.16), "SR", fill=(228, 232, 239, 255))
-    # ---- the saber ----
-    L, tip = size * 0.60, size * 0.075         # blade
-    bh, th = size * 0.036, size * 0.020         # blade half-height at guard / at tip
-    guard, grip = size * 0.088, size * 0.155
-    ang, cx, cy = -12, size * 0.50, size * 0.735
-    edge = (238, 242, 248, 255)
-    blade = _rot([(0, -bh), (L, -th), (L + tip * 0.7, -th * 0.5), (L + tip, 0),
-                  (L + tip * 0.7, th * 0.5), (L, th), (0, bh)], ang, cx, cy)
-    d.polygon(blade, fill=(188, 196, 208, 255))
-    d.line(_rot([(0, -bh * 0.5), (L, -th * 0.5)], ang, cx, cy), fill=edge, width=max(1, size // 90))
-    d.line(_rot([(0, bh), (L, th)], ang, cx, cy), fill=(120, 128, 140, 255), width=max(1, size // 110))
-    d.polygon(_rot([(-size * 0.012, -guard), (size * 0.020, -guard * 0.85),
-                    (size * 0.020, guard * 0.85), (-size * 0.012, guard)], ang, cx, cy), fill=(128, 134, 145, 255))
-    d.polygon(_rot([(-grip, -bh * 0.62), (0, -bh * 0.34), (0, bh * 0.34), (-grip, bh * 0.62)], ang, cx, cy),
-              fill=(52, 45, 40, 255))
-    for k in range(4):  # grip wrap
-        t = -grip * (0.16 + 0.2 * k)
-        d.line(_rot([(t, -bh * 0.55), (t, bh * 0.55)], ang, cx, cy), fill=(104, 92, 78, 255), width=max(1, size // 120))
-    pr = size * 0.030
-    px, py = _rot([(-grip - pr * 0.35, 0)], ang, cx, cy)[0]
-    d.ellipse((px - pr, py - pr, px + pr, py + pr), fill=(152, 159, 170, 255))
-    return im
-
-
-# ---------------- paper / book-cloth textures ----------------
-# Everything here is generated, so the app stays a single self-contained .exe.
-_TEX_PIL: dict[tuple[str, int], Image.Image] = {}
-_TEX_TK: dict[tuple[str, int], ImageTk.PhotoImage] = {}
-_TEX_AVG: dict[str, str] = {}
-TEX = 512           # tile edge; big enough that the repeat is not readable
-
-
-def _octave(size, radius, std, seed):
-    """Smooth tonal drift that tiles with no seam and no symmetry.
-
-    A random field is pasted as a 3x3 periodic lattice and then blurred; because
-    the source repeats with period `size`, so does the result, so the tile joins
-    seamlessly. (Mirroring a blob grid - the old approach - also hides the seam,
-    but the reflection makes the noise symmetric, which reads as a damask motif.)
-    """
-    noise = Image.effect_noise((size, size), 128).convert("L")
-    pad = int(radius * 3) + 2
-    big = Image.new("L", (size + 2 * pad, size + 2 * pad))
-    for y in range(0, size + 2 * pad, size):
-        for x in range(0, size + 2 * pad, size):
-            big.paste(noise, (x, y))
-    tile = big.filter(ImageFilter.GaussianBlur(radius)).crop((pad, pad, pad + size, pad + size))
-    sd = ImageStat.Stat(tile).stddev[0] or 1.0
-    k = std / sd
-    return tile.point(lambda v: max(0, min(255, int(128 + (v - 128) * k))))
-
-
-def _grain(size, std):
-    """Per-pixel paper grain, normalised to a known strength."""
-    g = Image.effect_noise((size, size), 9).convert("L")
-    sd = ImageStat.Stat(g).stddev[0] or 1.0
-    k = std / sd
-    return g.point(lambda v: max(0, min(255, int(128 + (v - 128) * k))))
-
-
-def _weave(size, amp, period, vertical):
-    """One direction of a cloth weave: alternating warp/weft threads."""
-    im = Image.new("L", (size, size), 128)
-    d = ImageDraw.Draw(im)
-    for i in range(0, size, period):
-        v = 128 + amp if (i // period) % 2 == 0 else 128 - amp
-        d.line((i, 0, i, size) if vertical else (0, i, size, i), fill=int(v))
-    return im.filter(ImageFilter.GaussianBlur(period * 0.30))
-
-
-def _tone(rgb, size, layers):
-    """Base colour plus a stack of 128-centred noise layers."""
-    delta = Image.new("L", (size, size), 128)
-    for lay in layers:
-        delta = ImageChops.add(delta, lay, scale=1.0, offset=-128)
-    return ImageChops.add(Image.new("RGB", (size, size), rgb), delta.convert("RGB"),
-                          scale=1.0, offset=-128)
-
-
-def _matte(rgb, size, seed):
-    """Flat matte surface: fine per-pixel grain only, so nothing repeats visibly."""
-    return _tone(rgb, size, [_grain(size, 1.7)])
-
-
-def _cloth(rgb, size, seed):
-    """A hardback book-cloth surface: soft drift, a woven weft/warp and paper grain."""
-    return _tone(rgb, size, [_octave(size, 12, 1.9, seed), _octave(size, 4, 1.3, seed + 5),
-                             _weave(size, 2.0, 4, True), _weave(size, 1.6, 4, False),
-                             _grain(size, 1.1)])
-
-
-def paper_pil(name, size=TEX):
-    """The generated tile for a paper name (None when the background is Off)."""
-    if name not in PAPER_RGB:
-        return None
-    key = (name, size)
-    if key not in _TEX_PIL:
-        make = {"matte": _matte, "cloth": _cloth}.get(PAPER_KIND.get(name, "matte"), _matte)
-        _TEX_PIL[key] = make(PAPER_RGB[name], size, 20260 + sum(PAPER_RGB[name]) + len(name) * 7)
-    return _TEX_PIL[key]
-
-
-def paper_tile(master, name, size=TEX):
-    """One PhotoImage tile, cached - canvas items need it on every repaint."""
-    if paper_pil(name, size) is None:
-        return None
-    key = (name, size)
-    if key not in _TEX_TK:
-        _TEX_TK[key] = ImageTk.PhotoImage(paper_pil(name, size), master=master)
-    return _TEX_TK[key]
-
-
-def paper_avg(name):
-    """Average colour of a tile as #rrggbb, so solid widget backgrounds blend with it."""
-    tile = paper_pil(name)
-    if tile is None:
-        return None
-    if name not in _TEX_AVG:
-        px = list(cast(Any, tile.resize((16, 16), Image.Resampling.LANCZOS).getdata()))
-        kn = len(px)
-        _TEX_AVG[name] = "#%02x%02x%02x" % tuple(sum(c[i] for c in px) // kn for i in range(3))
-    return _TEX_AVG[name]
 
 
 def theme_pick(paper):
@@ -640,101 +75,10 @@ def theme_pick(paper):
         pass
 
 
-def make_icon_file(path):
-    if not os.path.exists(path):
-        make_icon(256).save(path, sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (256, 256)])
-
-
 # ---------------- storage ----------------
-def load_db() -> dict[str, Any]:
-    try:
-        with open(DB_FILE, encoding="utf-8") as f:
-            db = json.load(f)
-    except Exception:
-        db = {}
-    for k, v in dict(bookmarks=[], progress={}, last=None, folders=[], set={}, downloads=[], ratings={},
-                     meta={}).items():
-        db.setdefault(k, v)
-    if isinstance(db.get("set"), dict):
-        db["set"].pop("headers", None)  # old per-source cookie/User-Agent overrides (feature removed)
-    if not isinstance(db.get("meta"), dict):
-        db["meta"] = {}
-    return db
-
-
-DB: dict[str, Any] = load_db()
-
-
-def save_db():
-    """Write atomically: a crash mid-save must never leave a truncated library behind."""
-    tmp = DB_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(DB, f, indent=1, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, DB_FILE)
-
-
-def load_update_state() -> dict:
-    """Update-check bookkeeping lives beside the library, not inside db.json."""
-    try:
-        with open(UPDATE_STATE_FILE, encoding="utf-8") as f:
-            state = json.load(f)
-        return state if isinstance(state, dict) else {}
-    except Exception:
-        return {}
-
-
-def save_update_state(state: dict):
-    try:
-        tmp = UPDATE_STATE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=1)
-        os.replace(tmp, UPDATE_STATE_FILE)
-    except Exception:
-        pass
-
-
 def reader_muted():
     """Muted text for overlay labels on the reader's own background."""
     return "#6f6a5d" if S("reader_paper") in LIGHT_PAPERS else "#9aa0ab"
-
-
-def S(k) -> Any:
-    v = DB["set"].get(k, DEFAULTS[k])
-    if v == "Paper white":                 # renamed in 1.2 while it was still an experiment
-        v = "Paper"
-    if k in ("paper", "reader_paper") and v not in PAPERS:  # older builds saved invalid names
-        v = DEFAULTS[k]
-    return v
-
-
-def pkey(m):
-    return f'{m["source"]}|{m["url"]}'
-
-
-def cached_genres(m):
-    """Genres we already learned for this manga (from a listing or its details page)."""
-    if not m.get("url"):
-        return []
-    e = (DB.get("meta") or {}).get(pkey(m))
-    gs = e.get("genres") if isinstance(e, dict) else (e if isinstance(e, list) else [])
-    return [str(g).strip() for g in (gs or []) if str(g).strip()]
-
-
-def remember_genres(m, genres):
-    """Cache genres in db.json so cards get labels without fetching the details page again."""
-    if not m.get("url"):
-        return
-    gs = []
-    for g in genres or []:
-        g = re.sub(r"^#+\s*", "", str(g)).strip()
-        if g and g not in gs:
-            gs.append(g)
-    if not gs or cached_genres(m) == gs[:20]:
-        return
-    DB.setdefault("meta", {})[pkey(m)] = {"genres": gs[:20]}
-    save_db()
 
 
 def genre_text(genres, limit=2):
@@ -748,806 +92,13 @@ def genre_text(genres, limit=2):
     return s
 
 
-def safe(s):
-    return re.sub(r'[\\/:*?"<>|]+', "_", s).strip(" .") or "untitled"
-
-
-def cache_path(url):
-    return os.path.join(CACHE, hashlib.md5(url.encode()).hexdigest())
-
-
-def dl_path(m, i, ch):
-    src = SOURCES.get(m["source"])
-    return os.path.join(S("dl_dir"), safe(src.name if src else m["source"]), safe(m["title"]),
-                        f"{i + 1:04d} - {safe(ch['title'])}.cbz")
-
-
-# ---------------- local library (downloaded .cbz) ----------------
-_JOB_ID = [0]
-
-
-def next_job_id():
-    _JOB_ID[0] += 1
-    return f"{int(time.time())}-{_JOB_ID[0]}"
-
-
-def manga_dl_dir(m):
-    src = SOURCES.get(m["source"])
-    return os.path.join(S("dl_dir"), safe(src.name if src else m["source"]), safe(m["title"]))
-
-
-def dl_records(m):
-    k = pkey(m)
-    return [r for r in DB["downloads"] if r.get("key") == k]
-
-
-def scan_dl_dir(m):
-    """Files on disk, keyed by chapter index (from the '0001 - Title.cbz' name). Survives a lost db."""
-    out = {}
-    d = manga_dl_dir(m)
-    if os.path.isdir(d):
-        for fn in sorted(os.listdir(d)):
-            mt = re.match(r"(\d+)\s*-\s*(.*)\.cbz$", fn, re.I)
-            if mt:
-                out[int(mt.group(1)) - 1] = os.path.join(d, fn)
-    return out
-
-
-def local_chapters(m):
-    """{chapter index: absolute .cbz path} - db records first, disk scan as a fallback."""
-    out = scan_dl_dir(m)
-    for r in dl_records(m):
-        p = r.get("path")
-        if p and os.path.exists(p):
-            out[r.get("i")] = p
-    return out
-
-
-def dl_record(m, i, ch=None):
-    recs = dl_records(m)
-    if ch:
-        u = ch.get("url")
-        for r in recs:
-            if u and r.get("ch", {}).get("url") == u:
-                return r
-    return next((r for r in recs if r.get("i") == i), None)
-
-
-def source_by_name(name):
-    return next((s for s in SOURCES.values() if s.name == name), None)
-
-
-def hidden_ids():
-    """Source ids the user switched off in Settings."""
-    return set(DB["set"].get("hidden") or [])
-
-
-def source_hidden(sid):
-    return sid in hidden_ids()
-
-
-def get_rating(m):
-    """{'score': 1-10, 'note': str, ...} for a manga, or None."""
-    return DB["ratings"].get(pkey(m))
-
-
-def source_label(m):
-    """Human name of a manga's source (falls back to the id stored in a disk folder)."""
-    src = SOURCES.get(m.get("source"))
-    return src.name if src else (m.get("name") or m.get("source") or "Local")
-
-
-def dl_folder_for(m):
-    return os.path.join(S("dl_dir"), safe(source_label(m)), safe(m.get("title", "untitled")))
-
-
-def disk_chapters(m):
-    """{chapter index: .cbz path} straight from the download folder - no db required."""
-    out, d = {}, dl_folder_for(m)
-    if os.path.isdir(d):
-        for fn in sorted(os.listdir(d)):
-            mt = re.match(r"(\d+)\s*-\s*(.*)\.cbz$", fn, re.I)
-            if mt:
-                out[int(mt.group(1)) - 1] = os.path.join(d, fn)
-    return out
-
-
-def local_chapters_any(m):
-    """local_chapters, but also works for a manga that was never bookmarked (no url/db key)."""
-    out = local_chapters(m)
-    return out or disk_chapters(m)
-
-
-def local_path(m, i, ch=None):
-    """The .cbz for chapter index i, whether it is in the db index or only on disk."""
-    r = dl_record(m, i, ch)
-    if r and r.get("path") and os.path.exists(r["path"]):
-        return r["path"]
-    p = disk_chapters(m).get(i)
-    return p if p and os.path.exists(p) else None
-
-
-def downloaded_manga():
-    """Every manga you have .cbz files for - bookmarked or not (index first, then a disk sweep)."""
-    groups = {}
-    for r in DB["downloads"]:
-        m = r.get("m") or {}
-        p = r.get("path") or ""
-        if not (m.get("title") and p and os.path.exists(p)):
-            continue
-        e = groups.setdefault((source_label(m), m["title"]),
-                              {"source": m.get("source", ""), "url": m.get("url", ""), "title": m["title"],
-                               "cover": m.get("cover", ""), "name": source_label(m)})
-        if not e["cover"]:
-            e["cover"] = m.get("cover", "")
-    root, titles = S("dl_dir"), {t for _, t in groups}
-    if os.path.isdir(root):
-        for sname in sorted(os.listdir(root)):
-            sdir = os.path.join(root, sname)
-            if not os.path.isdir(sdir):
-                continue
-            for title in sorted(os.listdir(sdir)):
-                tdir = os.path.join(sdir, title)
-                if (sname, title) in groups or title in titles or not os.path.isdir(tdir):
-                    continue
-                try:
-                    if not any(f.lower().endswith(".cbz") for f in os.listdir(tdir)):
-                        continue
-                except OSError:
-                    continue
-                src = source_by_name(sname)
-                groups[(sname, title)] = {"source": src.id if src else "", "url": "", "title": title,
-                                          "cover": "", "name": sname}
-    return list(groups.values())
-
-
-class _Resp:
-    __slots__ = ("content",)
-
-    def __init__(self, content):
-        self.content = content
-
-
-class LocalZip:
-    """Serves page bytes straight from a downloaded .cbz so the reader works offline."""
-    name = "Local"
-    nsfw = False
-
-    def get(self, url):
-        _, path, member = url.split("|", 2)
-        with zipfile.ZipFile(path) as z:
-            return _Resp(z.read(member))
-
-
-LOCAL = LocalZip()
-
-
-def cbz_pages(path):
-    with zipfile.ZipFile(path) as z:
-        names = [n for n in z.namelist() if not n.endswith("/")]
-    return [f"cbz|{path}|{n}" for n in sorted(names)]
-
-
-# ---------------- sources ----------------
-def pick(el, sel):
-    return el if not sel or sel == "self" else el.select_one(sel)
-
-
-def txt(el):
-    if el is not None and el.name == "meta":
-        return str(el.get("content") or "").strip()
-    return el.get_text(" ", strip=True) if el else ""
-
-
-def own_text(el):
-    """Only the element's own text nodes (skips <small>, <a class=label>, … children)."""
-    if el is None:
-        return ""
-    return " ".join(str(x).strip() for x in el.find_all(string=True, recursive=False)).strip()
-
-
-def attr(el, names):
-    if el is None:
-        return ""
-    if el.name == "meta":
-        return (el.get("content") or "").strip()
-    for n in names:
-        v = el.get(n)
-        if v and not v.startswith("data:"):
-            return v.strip().split(" ")[0] if n == "srcset" else v.strip()
-    return ""
-
-
-def href(el):
-    if el is None:
-        return ""
-    return el.get("href") or (el.find("a").get("href") if el.find("a") else "") or ""
-
-
-def _js_token(n, a):
-    """The 'e(c)' token generator from Dean Edwards' JS packer, in Python."""
-    if n >= a:
-        return _js_token(n // a, a) + _js_token(n % a, a)
-    return chr(n + 29) if n > 35 else "0123456789abcdefghijklmnopqrstuvwxyz"[n]
-
-
-def _js_unpack(text):
-    """Unpack the eval(function(p,a,c,k,e,d){…}) payload FanFox's chapter AJAX returns.
-
-    Returns the text unchanged when it is not packed, so callers can just regex the result.
-    """
-    m = re.search(r"\}\('(.*?)',(\d+),(\d+),'(.*?)'\.split\('\|'", text or "", re.S)
-    if not m:
-        return text or ""
-    p, a, c, k = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4).split("|")
-    p = p.replace("\\'", "'").replace("\\\\", "\\")
-    for i in range(c - 1, -1, -1):
-        if i < len(k) and k[i]:
-            p = re.sub(r"\b" + re.escape(_js_token(i, a)) + r"\b", lambda _m, v=k[i]: v, p)
-    return p
-
-
-class Source:
-    def __init__(self, d):
-        self.d, self.id, self.name = d, d["id"], d["name"]
-        self.api = d.get("api")
-        self.base = d.get("base_url", "").rstrip("/")
-        self.nsfw = bool(d.get("nsfw"))
-        self._tl = threading.local()
-        self._genres = None
-        # Per-host request pacing. A handful of cover lookups used to fire dozens of
-        # requests at once and some sites answered with HTTP 429; this keeps a polite
-        # gap between requests to the same host without slowing down CDN images.
-        self._rl_lock = threading.Lock()
-        self._rl: dict[str, tuple[float, float]] = {}
-
-    # ---- http ----
-    def _session(self):
-        s = getattr(self._tl, "s", None)
-        if s is None:
-            s = cffi.Session(impersonate=self.d.get("impersonate", "chrome124")) if cffi else requests.Session()
-            self._tl.s = s
-        return s
-
-    @staticmethod
-    def _host(url):
-        try:
-            return urlsplit(url).netloc.lower()
-        except Exception:
-            return ""
-
-    def _throttle(self, host, gap):
-        with self._rl_lock:
-            nxt, cool = self._rl.get(host, (0.0, 0.0))
-            now = time.monotonic()
-            wait = max(nxt, cool) - now
-            self._rl[host] = (max(now, nxt) + gap, cool)
-        if wait > 0:
-            time.sleep(min(wait, 15.0))
-
-    def _cool(self, host, seconds):
-        with self._rl_lock:
-            nxt, cool = self._rl.get(host, (0.0, 0.0))
-            self._rl[host] = (nxt, max(cool, time.monotonic() + seconds))
-
-    def get(self, url, referer=None):
-        h = dict(UA)
-        h["Referer"] = referer or (self.base + "/")
-        h.update(self.d.get("headers", {}))
-        host, last = self._host(url), None
-        image = bool(re.search(r"\.(?:jpe?g|png|webp|gif|avif)(?:\?|$)", url, re.I))
-        gap = 0.02 if image else float(self.d.get("request_delay", 0.05))
-        for attempt in range(3):
-            self._throttle(host, gap)
-            try:
-                r = self._session().get(url, headers=h, timeout=25)
-            except Exception as e:
-                last = e
-                if attempt < 2:
-                    time.sleep(0.5 * (attempt + 1))
-                    continue
-                raise
-            if r.status_code == 429:
-                # Honour Retry-After when the site sends one, but never stall a
-                # worker for minutes. Other requests to the same host wait too.
-                try:
-                    wait = float(r.headers.get("Retry-After") or 0)
-                except Exception:
-                    wait = 0.0
-                wait = max(wait, 2.0 * (attempt + 1))
-                self._cool(host, wait)
-                last = requests.HTTPError(f"429 Too Many Requests from {host}", response=r)
-                if attempt < 2:
-                    time.sleep(min(wait, 8.0))
-                    continue
-            elif r.status_code in (500, 502, 503, 504) and attempt < 2:
-                last = requests.HTTPError(f"{r.status_code} from {host}", response=r)
-                time.sleep(0.6 * (attempt + 1))
-                continue
-            r.raise_for_status()
-            return r
-        raise last or RuntimeError("request failed")
-
-
-    def soup(self, url):
-        return BeautifulSoup(self.get(url).text, "html.parser")
-
-    def abs(self, u):
-        return urljoin(self.base + "/", u) if u else ""
-
-    # ---- capabilities ----
-    def kinds(self):
-        if self.api in ("mangadex", "webtoons"):
-            return ["popular", "latest"]
-        return [k for k in ("popular", "latest") if k in self.d]
-
-    def can_search(self):
-        return bool(self.api) or "search" in self.d
-
-    def genres(self):
-        """[(label, value)] or []. Called from a worker thread."""
-        if self.api == "mangadex":
-            if self._genres is None:
-                j = requests.get(MD_API + "/manga/tag", headers=UA, timeout=25).json()
-                tags = [(t["attributes"]["name"].get("en", "?"), t["id"]) for t in j["data"]
-                        if t["attributes"].get("group") in ("genre", "theme")]
-                self._genres = sorted(tags)
-            return self._genres
-        if self.api == "webtoons":
-            return [("Trending", "trending"), ("Popular", "popular"),
-                    ("Originals", "originals"), ("Canvas", "canvas")]
-        return [tuple(g) for g in self.d.get("genres", [])] if "genre" in self.d else []
-
-    def _tag_list(self, scope, sels=None):
-        """First selector group that yields text becomes the genre/category list.
-
-        sources.json `tags` entries are selectors for the details page; a listing can also
-        carry its own `tags` selectors when the card itself shows genres.
-        """
-        if sels is None:
-            sels = self.d.get("tags") or []
-        if isinstance(sels, str):
-            sels = [sels]
-        for sel in sels:
-            out = []
-            try:
-                els = scope.select(sel)
-            except Exception:
-                continue
-            for e in els:
-                t = re.sub(r"^#+\s*", "", txt(e)).strip()
-                if t and t not in out:
-                    out.append(t)
-            if out:
-                return out[:20]
-        return []
-
-    # ---- listing ----
-    def listing(self, kind, page=1, query="", genre=""):
-        if self.api == "mangadex":
-            return self._md_listing(kind, page, query, genre)
-        if self.api == "webtoons":
-            return self._wt_listing(kind, page, query, genre)
-        key = "genre" if genre and kind != "search" else kind
-        c = self.d.get(key)
-        if not c:
-            return []
-        if key in ("latest", "genre"):
-            c = {**self.d.get("popular", {}), **c}
-        if c.get("single_page") and page > 1:
-            return []
-        url = self.abs(c["url"].format(page=page, query=quote_plus(query), offset=(page - 1) * PAGE_SIZE, genre=genre))
-        ck = (self.id, key, page, query, genre, url)
-        hit = listing_cache_get(ck)
-        if hit is not None:
-            return hit
-        out, seen = [], set()
-        for it in self.soup(url).select(c["item"]):
-            t = pick(it, c.get("title"))
-            link = pick(it, c.get("link") or c.get("title"))
-            title = str(txt(t) or (t.get("title", "") if t else ""))
-            # Listing markup often appends a rank/volume badge inside the link. The
-            # link's title attribute is the clean name ("One Piece", not "One Piece 1").
-            if c.get("title_attr") and t is not None and t.get(c["title_attr"]):
-                title = str(t.get(c["title_attr"]))
-            elif title.endswith(("...", "…")) and t is not None and t.get("title"):
-                title = str(t.get("title"))
-            u = self.abs(href(link))
-            if not title or not u or u in seen:
-                continue
-            seen.add(u)
-            cover = self.abs(attr(pick(it, c.get("cover", "img")), c.get("cover_attr", IMG_ATTRS)))
-            # Some sites emit a broken local cover path in list markup while the real
-            # image lives on their CDN. Rewrites keep card downloads from retrying 404s.
-            for pat, rep in c.get("cover_rewrite", []):
-                cover = re.sub(pat, rep, cover)
-            out.append({"title": title, "url": u, "cover": cover, "source": self.id,
-                        "genres": self._tag_list(it, c.get("tags"))})
-        listing_cache_put(ck, out)
-        return out
-
-    def _chapters(self, soup, c):
-        chs, seen = [], set()
-        if not c.get("item"):
-            return chs
-        pat = re.compile(c["title_pattern"]) if c.get("title_pattern") else None
-        for it in soup.select(c["item"]):
-            u = self.abs(href(it))
-            if not u or u in seen:
-                continue
-            seen.add(u)
-            t = txt(it) or it.get("title", "Chapter")
-            if pat:
-                m = pat.search(t)
-                if m and m.group(1).strip():
-                    vals = [m.group(0)] + [g.strip() if g else "" for g in m.groups()]
-                    t = c.get("title_format", "{1}").format(*vals)
-            chs.append({"title": t, "url": u})
-        return chs
-
-    def details(self, url):
-        if self.api == "mangadex":
-            return self._md_details(url)
-        if self.api == "webtoons":
-            return self._wt_details(url)
-        d, soup = self.d.get("details", {}), self.soup(url)
-        sel = lambda k: soup.select_one(d[k]) if d.get(k) else None
-        cover = self.abs(attr(sel("cover"), d.get("cover_attr", IMG_ATTRS))) if d.get("cover") else ""
-        title = own_text(sel("title")) if d.get("title_direct_text") else txt(sel("title"))
-        if d.get("title_pattern"):
-            mt = re.search(d["title_pattern"], title)
-            if mt and mt.group(1).strip():
-                title = mt.group(1).strip()
-        description = txt(sel("description"))
-        genres = self._tag_list(soup)
-        c = self.d.get("chapters") or {}
-        # The chapter list often lives on a second page. Fetch it while the details
-        # page is still being parsed instead of waiting for one request after another.
-        fut = None
-        if c.get("list_path"):
-            fut = DETAIL_POOL.submit(self.soup, url.rstrip("/").rsplit("/", 1)[0] + c["list_path"])
-        chs = self._chapters(soup, c)
-        if fut is not None:
-            try:
-                chs = self._chapters(fut.result(), c) or chs
-            except Exception:
-                pass
-        if c.get("newest_first", True):
-            chs.reverse()
-        return {"title": title, "description": description, "cover": cover, "chapters": chs, "genres": genres}
-
-    def pages(self, url):
-        if self.api == "mangadex":
-            return self._md_pages(url)
-        if self.api == "webtoons":
-            return self._wt_pages(url)
-        if self.api == "fanfox":
-            return self._ff_pages(url)
-        p = self.d["pages"]
-        if p.get("url_suffix"):
-            url = url.rstrip("/") + p["url_suffix"]
-        out, seen = [], set()
-        if p.get("script_regex"):  # image list stored in a <script> array
-            m = re.search(p["script_regex"], self.get(url).text, re.S)
-            for u in re.findall(r"""['"](https?://[^'"]+)['"]""", m.group(1)) if m else []:
-                if u not in seen:
-                    seen.add(u)
-                    out.append(u)
-            return out
-        if p.get("page_urls"):  # one image per page, page URLs listed in a <select>
-            urls = []
-            for o in self.soup(url).select(p["page_urls"]):
-                u = self.abs(o.get("value") or "")
-                if u and u not in urls:
-                    urls.append(u)
-
-            def one(pu):
-                found = []
-                for i in self.soup(pu).select(p["image"]):
-                    u = self.abs(attr(i, p.get("attr", IMG_ATTRS)))
-                    if u and u not in found:
-                        found.append(u)
-                return found
-
-            if urls:
-                with ThreadPoolExecutor(max_workers=min(6, len(urls))) as ex:
-                    for part in ex.map(one, urls):
-                        for u in part:
-                            if u not in seen:
-                                seen.add(u)
-                                out.append(u)
-            return out
-        for i in self.soup(url).select(p["image"]):
-            u = self.abs(attr(i, p.get("attr", IMG_ATTRS)))
-            if u and u not in seen:
-                seen.add(u)
-                out.append(u)
-        return out
-
-    # ---- MangaDex (official API, no scraping) ----
-    def _md(self, path, **params):
-        r = requests.get(MD_API + path, params=params, headers=UA, timeout=25)
-        r.raise_for_status()
-        return r.json()
-
-    @staticmethod
-    def _md_title(a):
-        t = a.get("title") or {}
-        if t.get("en"):
-            return t["en"]
-        for alt in a.get("altTitles") or []:
-            if isinstance(alt, dict) and alt.get("en"):
-                return alt["en"]
-        for key in ("ja-ro", "ko-ro", "zh-ro", "ja", "ko", "zh", "zh-hk"):
-            if t.get(key):
-                return t[key]
-        return next(iter(t.values()), "Untitled")
-
-    @staticmethod
-    def _md_tags(a):
-        out = []
-        for t in a.get("tags") or []:
-            ta = t.get("attributes") or {}
-            if ta.get("group") not in ("genre", "theme"):
-                continue
-            name = (ta.get("name") or {}).get("en") or next(iter((ta.get("name") or {}).values()), "")
-            if name and name not in out:
-                out.append(name)
-        return out
-
-    def _md_cover(self, x, size=".256.jpg"):
-        for r in x.get("relationships", []):
-            if r["type"] == "cover_art" and r.get("attributes"):
-                return f"https://uploads.mangadex.org/covers/{x['id']}/{r['attributes']['fileName']}{size}"
-        return ""
-
-    def _md_listing(self, kind, page, query, genre):
-        p = {"limit": PAGE_SIZE, "offset": (page - 1) * PAGE_SIZE, "includes[]": ["cover_art"],
-             "contentRating[]": self._md_ratings(), "hasAvailableChapters": "true",
-             "availableTranslatedLanguage[]": ["en"]}
-        if kind == "search" and query:
-            p["title"] = query
-            p["order[relevance]"] = "desc"
-        elif kind == "latest":
-            p["order[latestUploadedChapter]"] = "desc"
-        else:
-            p["order[followedCount]"] = "desc"
-        if genre:
-            p["includedTags[]"] = [genre]
-        return [{"title": self._md_title(x["attributes"]), "url": f"https://mangadex.org/title/{x['id']}",
-                 "cover": self._md_cover(x), "source": self.id,
-                 "genres": self._md_tags(x["attributes"])} for x in self._md("/manga", **p)["data"]]
-
-    def _md_ratings(self):
-        return ["safe", "suggestive", "erotica", "pornographic"] if S("nsfw") else ["safe", "suggestive"]
-
-    def _md_feed(self, mid, langs):
-        """One pass over a manga's chapter feed. langs=None means 'every language'."""
-        found: dict[Any, tuple[int, dict[str, Any]]] = {}
-        off = 0
-        while True:
-            p = {"order[chapter]": "asc", "limit": 500, "offset": off, "includeExternalUrl": 0,
-                 "contentRating[]": self._md_ratings()}
-            if langs:
-                p["translatedLanguage[]"] = langs
-            j = self._md(f"/manga/{mid}/feed", **p)
-            for c in j["data"]:
-                ca = c["attributes"]
-                if not ca.get("pages") or ca.get("externalUrl"):
-                    continue
-                num = ca.get("chapter")
-                key = num if num is not None else (None, ca.get("translatedLanguage"), c["id"])
-                title = f"Chapter {num}" if num not in (None, "") else "Oneshot"
-                if ca.get("title"):
-                    title += f" \u2014 {ca['title']}"
-                pages = int(ca.get("pages") or 0)
-                prev = found.get(key)
-                # Several groups can upload the same chapter number. Keep the version
-                # with the most pages, so a split/partial upload cannot look incomplete.
-                if prev is None or pages > prev[0]:
-                    found[key] = (pages, {"title": title, "url": f"https://mangadex.org/chapter/{c['id']}"})
-            off += 500
-            if off >= j.get("total", 0):
-                break
-        return [ch for _pages, ch in found.values()]
-
-    def _md_details(self, url):
-        mid = url.rstrip("/").split("/")[-1]
-        x = self._md(f"/manga/{mid}", **{"includes[]": ["cover_art"]})["data"]
-        a = x["attributes"]
-        chs = self._md_feed(mid, ["en"])
-        desc = (a.get("description") or {}).get("en", "")
-        if not chs:
-            desc = (desc + "\n\nNo English chapters are available on MangaDex for this title. "
-                           "Licensed releases that only exist as external links are skipped.").strip()
-        return {"title": self._md_title(a), "description": desc,
-                "cover": self._md_cover(x, ".512.jpg"), "chapters": chs, "genres": self._md_tags(a)}
-
-    def _md_pages(self, url):
-        j = self._md(f"/at-home/server/{url.rstrip('/').split('/')[-1]}")
-        ch = j["chapter"]
-        files, folder = (ch["dataSaver"], "data-saver") if ch.get("dataSaver") else (ch["data"], "data")
-        return [f"{j['baseUrl']}/{folder}/{ch['hash']}/{f}" for f in files]
-
-    # ---- WEBTOON (official site; listing/viewer are HTML, episodes come from the mobile API) ----
-    WT_RANKS = ("trending", "popular", "originals", "canvas")
-
-    @staticmethod
-    def _wt_day():
-        return ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")[time.localtime().tm_wday]
-
-    def _wt_listing(self, kind, page=1, query="", genre=""):
-        if genre in self.WT_RANKS:
-            if page > 1:
-                return []
-            url = f"{self.base}/en/ranking/{genre}"
-        elif kind == "search":
-            if page > 1:
-                return []
-            url = f"{self.base}/en/search?keyword={quote_plus(query)}"
-        elif kind == "latest":
-            if page > 1:
-                return []
-            url = f"{self.base}/en/originals/{self._wt_day()}?sortOrder=UPDATE"
-        else:
-            if page > len(self.WT_RANKS):
-                return []
-            url = f"{self.base}/en/ranking/{self.WT_RANKS[page - 1]}"
-        out, seen = [], set()
-        for a in self.soup(url).select(".webtoon_list li a"):
-            u = self.abs(a.get("href"))
-            if not u or u in seen:
-                continue
-            seen.add(u)
-            t = a.select_one(".title") or a.select_one(".subj")
-            title = txt(t) or a.get("title", "")
-            if not title:
-                continue
-            img = a.select_one("img")
-            g = a.select_one(".info_text .genre, .info_text_inner .genre")
-            out.append({"title": title, "url": u,
-                        "cover": attr(img, ["data-src", "src"]) if img else "", "source": self.id,
-                        "genres": [txt(g)] if g and txt(g) else []})
-        return out
-
-    def _wt_details(self, url):
-        soup = self.soup(url)
-        t = soup.select_one("h1.subj") or soup.select_one("h3.subj") or soup.select_one("h1")
-        desc = soup.select_one("#_asideDetail p.summary") or soup.select_one("p.summary")
-        cov = soup.select_one("meta[property='og:image']")
-        return {"title": txt(t), "description": txt(desc), "cover": attr(cov, []) if cov else "",
-                "chapters": self._wt_chapters(url), "genres": self._tag_list(soup)}
-
-    def _wt_chapters(self, url):
-        m = re.search(r"title_no=(\d+)", url or "")
-        if not m:
-            return []
-        kind = "canvas" if "/canvas/" in url else "webtoon"
-        api = f"https://m.webtoons.com/api/v1/{kind}/{m.group(1)}/episodes?pageSize=99999"
-        if kind == "canvas":
-            api += "&readingLanguageCode=en"
-        j = self.get(api, referer="https://m.webtoons.com/").json()
-        eps = ((j.get("result") or {}).get("episodeList")) or []
-        chs = []
-        for e in eps:
-            u = e.get("viewerLink") or ""
-            if not u:
-                continue
-            chs.append({"title": html.unescape(e.get("episodeTitle") or "Episode"), "url": self.abs(u)})
-        chs.reverse()  # the API returns newest first
-        return chs
-
-    def _wt_pages(self, url):
-        out, seen = [], set()
-        for i in self.soup(url).select("div#_imageList img, #_imageList img"):
-            u = attr(i, ["data-url", "data-src", "src"])
-            if u and u not in seen:
-                seen.add(u)
-                out.append(self.abs(u))
-        return out
-
-    # ---- FanFox (reader pages are handed out one-by-one by a packed-JS AJAX endpoint) ----
-    def _ff_pages(self, url):
-        html = self.get(url).text
-        mc = re.search(r"var\s+chapterid\s*=\s*(\d+)", html)
-        mn = re.search(r"var\s+imagecount\s*=\s*(\d+)", html)
-        if not mc:
-            return []
-        cid = mc.group(1)
-        total = int(mn.group(1)) if mn else 0
-        base = url.rsplit("/", 1)[0]
-        ref = url
-
-        def one(i):
-            try:
-                raw = _js_unpack(self.get(f"{base}/chapterfun.ashx?cid={cid}&page={i}", referer=ref).text)
-                pix = re.search(r'var\s+pix\s*=\s*"([^"]+)"', raw)
-                img = re.search(r'"(/[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"', raw, re.I)
-                if not (pix and img):
-                    return ""
-                host = pix.group(1).replace("\\/", "/")
-                if host.startswith("//"):
-                    host = "https:" + host
-                return host + img.group(1).replace("\\/", "/")
-            except Exception:
-                return ""
-
-        if not total:
-            return []
-        # FanFox needs one request per page; a few in parallel keeps a 20-page chapter quick.
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            urls = list(ex.map(one, range(1, total + 1)))
-        return [u for u in urls if u]
-
-
-SOURCES = {}
-# Listing pages are reused when the user bounces between sources. Without this, every
-# source switch re-downloaded the same HTML and rebuilt the same 20-30 cards.
-LIST_CACHE: "OrderedDict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]]" = OrderedDict()
-LIST_LOCK = threading.Lock()
-LIST_TTL = 180.0
-LIST_MAX = 240
-
-
-def listing_cache_get(key):
-    now = time.time()
-    with LIST_LOCK:
-        hit = LIST_CACHE.get(key)
-        if hit is None:
-            return None
-        ts, items = hit
-        if now - ts > LIST_TTL:
-            LIST_CACHE.pop(key, None)
-            return None
-        LIST_CACHE.move_to_end(key)
-        return [{**x, "genres": list(x.get("genres") or [])} for x in items]
-
-
-def listing_cache_put(key, items):
-    with LIST_LOCK:
-        LIST_CACHE[key] = (time.time(), [dict(x) for x in items])
-        LIST_CACHE.move_to_end(key)
-        while len(LIST_CACHE) > LIST_MAX:
-            LIST_CACHE.popitem(last=False)
-
-
-def rebuild_sources():
-    SOURCES.clear()
-    with LIST_LOCK:
-        LIST_CACHE.clear()
-    if not os.path.exists(SRC_FILE):
-        with open(SRC_FILE, "w", encoding="utf-8") as f:
-            json.dump({"sources": []}, f, indent=2)
-    try:
-        with open(SRC_FILE, encoding="utf-8") as f:
-            data = json.load(f).get("sources", [])
-    except Exception:
-        data = []
-    # 18+ sources always sort after the regular ones, regardless of JSON order.
-    for d in sorted(data, key=lambda x: bool(x.get("nsfw"))):
-        try:
-            SOURCES[d["id"]] = Source(d)
-        except Exception:
-            pass
-
-
-# ---------------- background work ----------------
-Q = queue.Queue()
-NET_POOL = ThreadPoolExecutor(4)
-DETAIL_POOL = ThreadPoolExecutor(4)   # details page + its separate chapter-list page, in parallel
-IMG_POOL = ThreadPoolExecutor(12)
-PAGE_POOL = ThreadPoolExecutor(6)
-# Decoded card thumbnails (memory only). Without this every section change decoded the
-# same covers from disk again, which is what made scrolling and menu switches feel rough.
-THUMB_CACHE: "OrderedDict[tuple[Any, ...], Image.Image]" = OrderedDict()
-THUMB_LOCK = threading.Lock()
-THUMB_MAX = 600
-
-WT_MAX_INFLIGHT = 4        # pages downloading at once in webtoon mode
-WT_AHEAD = 3               # pages kept loaded below the viewport
+WT_MAX_INFLIGHT = 6        # pages downloading at once in webtoon mode (PAGE_POOL has 6 threads)
+WT_AHEAD = 5               # pages kept loaded below the viewport
 WT_BEHIND = 1              # ... and above it
 WT_KEEP = 1                # extra pages kept before an image is dropped from memory
 WT_MAX_PX = 14000000       # cap for one page's Tk image (~56 MB): tall strips are the memory hogs
+WT_STRIP = 1000            # tall pages are shown as stacked strips of at most this height
+WT_STRIPS_PER_TICK = 2     # strip images built per frame, so a huge page never blocks scrolling
 # Middle-click auto-scroll: the pointer's distance from the viewport centre sets direction and
 # speed, so a middle click in the lower half starts a slow downward scroll without any dragging.
 MMB_DEAD = 26              # px around the viewport centre where the view stands still
@@ -1584,16 +135,6 @@ def img_size(url):
         pass
     return (0, 0)
 
-
-
-def bg(fn, cb, pool=None):
-    def w():
-        try:
-            res = (fn(), None)
-        except Exception as e:
-            res = (None, e)
-        Q.put((cb, res))
-    (pool or NET_POOL).submit(w)
 
 
 def version_key(v):
@@ -1665,215 +206,6 @@ def download_release_asset(info):
             pass
         raise
     return dest
-
-
-def backup_db():
-    """Timestamped db.json copy in data\\backups, used before every update install."""
-    try:
-        bdir = os.path.join(DATA, "backups")
-        os.makedirs(bdir, exist_ok=True)
-        name = f"db-{time.strftime('%Y%m%d-%H%M%S')}-v{APP_VERSION}.json"
-        dest = os.path.join(bdir, name)
-        shutil.copy2(DB_FILE, dest)
-        return dest
-    except Exception as e:
-        return str(e)
-
-
-def fetch_pages(src, url):
-    """Fetch a chapter's page list. Source.get already retries 429/5xx, so one extra
-    attempt here is enough - stacking two long retry loops made failures feel frozen."""
-    last = None
-    for attempt in range(2):
-        try:
-            pages = src.pages(url)
-            if pages:
-                return pages
-        except Exception as e:
-            last = e
-        if attempt < 1:
-            time.sleep(0.6)
-    if last:
-        raise last
-    return []
-
-
-def load_img(src, url, cb, size=None, width=None, height=None, pool=None, alive=None):
-    """Download (cached) + decode + resize in a worker; cb(PIL image or None) runs on the UI thread.
-
-    Returns True when the work was actually queued - callers count in-flight jobs from this, so a
-    request that cannot be made never leaves a slot occupied forever.
-    """
-    if not src or not url:
-        return False
-    ck = (url, width, height, tuple(size) if size else None)
-    cacheable = bool(size)
-
-    def cached_image():
-        if not cacheable:
-            return None
-        with THUMB_LOCK:
-            im = THUMB_CACHE.get(ck)
-            if im is not None:
-                THUMB_CACHE.move_to_end(ck)
-            return im
-
-    def remember(im):
-        if not cacheable or im is None:
-            return
-        with THUMB_LOCK:
-            THUMB_CACHE[ck] = im
-            THUMB_CACHE.move_to_end(ck)
-            while len(THUMB_CACHE) > THUMB_MAX:
-                THUMB_CACHE.popitem(last=False)
-
-    def w():
-        if alive and not alive():
-            return
-        hit = cached_image()
-        if hit is not None:
-            Q.put((lambda r, e: cb(r), (hit, None)))
-            return
-        im = None
-        try:
-            p = cache_path(url)
-            if not os.path.exists(p):
-                data, last = None, None
-                for attempt in range(2):
-                    if alive and not alive():
-                        return
-                    try:
-                        data = src.get(url).content
-                        if data:
-                            break
-                        last = RuntimeError("empty image response")
-                    except Exception as e:
-                        last = e
-                        resp = getattr(e, "response", None)
-                        if resp is not None and 400 <= getattr(resp, "status_code", 0) < 500:
-                            break  # 404/403 will not fix itself; don't stall the cover queue
-                    if attempt < 1:
-                        time.sleep(0.35)
-                if not data:
-                    raise last or RuntimeError("image download failed")
-                tmp = f"{p}.{threading.get_ident()}.part"  # two pages of the same url must not share a temp file
-                try:
-                    with open(tmp, "wb") as f:
-                        f.write(data)
-                    os.replace(tmp, p)
-                finally:
-                    if os.path.exists(tmp):
-                        try:
-                            os.remove(tmp)
-                        except OSError:
-                            pass
-            if alive and not alive():
-                return
-            im = Image.open(p)
-            if width:
-                th = height or max(1, int(im.height * width / float(im.width)))
-                try:
-                    im.draft("RGB", (width * 2, th * 2))
-                except Exception:
-                    pass
-                im = im.convert("RGB")
-                im = im.resize((width, th), Image.Resampling.BICUBIC)
-            elif size:
-                try:
-                    im.draft("RGB", (size[0] * 2, size[1] * 2))
-                except Exception:
-                    pass
-                im = ImageOps.fit(im.convert("RGB"), size)
-            else:
-                im = im.convert("RGB")
-        except Exception:
-            im = None
-            try:  # a broken/HTML download must not sit in the cache and fail forever
-                if os.path.exists(cache_path(url)):
-                    os.remove(cache_path(url))
-            except OSError:
-                pass
-        remember(im)
-        Q.put((lambda r, e: cb(r), (im, None)))
-
-    (pool or IMG_POOL).submit(w)
-    return True
-
-
-# ---------------- download manager (one CBZ per chapter, slow + polite) ----------------
-DL_Q = queue.Queue()
-JOBS = []
-
-
-def _ext(b):
-    if b[:8] == b"\x89PNG\r\n\x1a\n":
-        return "png"
-    if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
-        return "webp"
-    if b[:3] == b"GIF":
-        return "gif"
-    return "jpg"
-
-
-def run_job(job):
-    src, m, ch = SOURCES[job["m"]["source"]], job["m"], job["ch"]
-    job["state"] = "getting pages"
-    urls = src.pages(ch["url"])
-    job["total"] = len(urls)
-    dest = job["path"]
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    tmp = dest + ".part"
-    try:
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:
-            for i, u in enumerate(urls):
-                if job["state"] == "cancelled":
-                    raise InterruptedError
-                job["state"] = "downloading"
-                cp, data = cache_path(u), None
-                if os.path.exists(cp):
-                    data = open(cp, "rb").read()  # already viewed in the reader: no request, no delay
-                else:
-                    for attempt in range(3):
-                        try:
-                            data = src.get(u).content
-                            break
-                        except Exception as e:
-                            if attempt == 2:
-                                raise
-                            time.sleep(15 if "429" in str(e) else 3 * (attempt + 1))
-                    time.sleep(S("dl_delay") * random.uniform(0.7, 1.4))
-                assert data is not None
-                z.writestr(f"{i + 1:03d}.{_ext(data)}", data)
-                job["done"] = i + 1
-        os.replace(tmp, dest)
-        job["state"] = "done"
-        time.sleep(max(2.0, S("dl_delay") * 2))  # pause between chapters
-    except InterruptedError:
-        job["state"] = "cancelled"
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
-    except Exception as e:
-        job["state"] = "error: " + str(e)[:50]
-        try:
-            os.remove(tmp)
-        except Exception:
-            pass
-
-
-def dl_worker():
-    while True:
-        job = DL_Q.get()
-        if job["state"] == "cancelled":
-            continue
-        try:
-            run_job(job)
-        except Exception as e:
-            job["state"] = "error: " + str(e)[:50]
-
-
-threading.Thread(target=dl_worker, daemon=True).start()
 
 
 # ---------------- ui helpers ----------------
@@ -2192,8 +524,8 @@ class App(ctk.CTk):
                 break
             try:
                 cb(*res)
-            except Exception:
-                pass
+            except Exception as e:
+                log_error("poll", e)
             n += 1
         self.after(12 if not Q.empty() else 40, self.poll)
 
@@ -2215,6 +547,7 @@ class App(ctk.CTk):
     def close(self):
         if self.cur == "Reader":
             self.save_reader()
+        save_db()                    # a pending save_db_soon must not be lost on exit
         self.destroy()
 
     def show(self, name):
@@ -4327,7 +2660,7 @@ class App(ctk.CTk):
             p.setdefault("read", [])
             if url not in p["read"]:
                 p["read"].append(url)
-        save_db()
+        save_db_soon()
 
     def open_chapter(self, m, chs, idx, nxt=False, restart=False):
         if self.cur == "Reader":
@@ -4631,7 +2964,8 @@ class App(ctk.CTk):
         ph = page_box()
         r.update(c=c, hs=hs, dims=dims, state=[0] * n, tries=[0] * n, t0=[0.0] * n, inflight=0, wgen=0,
                  width=W, items=[], texts=[], photos={}, nextbtn=None, ys=[], total=0, cw=W, sreg=0, lastreq=0.0,
-                 borders=[], tex=None, tex_items=[], tex_cols=0, tex_rows=0)
+                 borders=[], tex=None, tex_items=[], tex_cols=0, tex_rows=0,
+                 strips={}, split={}, splitq=[])
         self.wt_make_tex(r, c, c.winfo_width() or W, c.winfo_height() or 800)
         # Pages are canvas ITEMS, never child widgets: Windows refuses to place child windows beyond
         # +-32767 px, so a frame full of labels freezes in place once a chapter is longer than that
@@ -4678,7 +3012,9 @@ class App(ctk.CTk):
             ys.append(y)
             x = max(0, (cw - w) // 2)
             try:
-                c.coords(items[i], x, y)
+                # a tall page is several stacked items; strip k sits k*WT_STRIP below the page top
+                for k, it in enumerate(self.wt_strip_items(r, i)):
+                    c.coords(it, x, y + k * WT_STRIP)
                 c.coords(texts[i], x + w / 2, y + h / 2)
                 if i < len(borders):
                     c.coords(borders[i], x - 1, y - 1, x + w + 1, y + h + 1)
@@ -4761,11 +3097,9 @@ class App(ctk.CTk):
     def wt_retry(self, i):
         r = self.reader
         if r and r.get("state") and 0 <= i < len(r["state"]) and r["state"][i] == 3:
+            self.wt_clear_strips(i)
+            self.wt_reset_page(i)
             r["state"][i], r["tries"][i] = 0, 0
-            try:
-                r["c"].itemconfigure(r["texts"][i], text=f"Page {i + 1}")
-            except Exception:
-                pass
 
     def wt_tick(self, gen):
         r = self.reader
@@ -4787,6 +3121,7 @@ class App(ctk.CTk):
                 top = c.canvasy(0)
             bot = top + ch
             self.wt_paint_tex(r, c)
+            self.wt_split_tick()    # a few strips per frame keeps a tall page from stalling the scroll
             i0 = 0
             for i, y in enumerate(ys):
                 if y <= top + 8:
@@ -4826,16 +3161,15 @@ class App(ctk.CTk):
             # drop images far from the viewport: without this a long chapter piles up every page
             # in memory (a tall strip is ~40-60 MB as a Tk image) until the whole app crawls
             klo, khi = i0 - WT_BEHIND - WT_KEEP, i1 + WT_AHEAD + WT_KEEP
-            ph = page_box()
             for i in range(n):
-                if st[i] == 2 and (i < klo or i > khi):
-                    c.itemconfigure(r["items"][i], image=ph)
-                    c.itemconfigure(r["texts"][i], text=f"Page {i + 1}")
-                    self.wt_border(i, True)   # placeholder again, so the box is visible
-                    r["photos"].pop(i, None)
+                if st[i] in (2, 4) and (i < klo or i > khi):
+                    if st[i] == 4:
+                        self.wt_split_cancel(i)
+                    self.wt_reset_page(i)     # placeholder again, for every strip
+                    self.wt_border(i, True)   # ... so the page box is visible
                     st[i] = 0
-        except Exception:
-            pass
+        except Exception as e:
+            log_error("wt_tick", e)
         self.after(90, lambda: self.wt_tick(gen))
 
     def wt_request(self, i, gen):
@@ -4870,16 +3204,144 @@ class App(ctk.CTk):
                 c.itemconfigure(r["texts"][i], text=f"Page {i + 1} failed — click to retry")
             return
         self.wt_fix_box(i, im)
+        if im.height > WT_STRIP:   # tall page: build its strips over the next few frames
+            self.wt_split(i, im)
+            return
+        self.wt_clear_strips(i)
         try:
             ph = ImageTk.PhotoImage(im)
-        except Exception:
+        except Exception as e:
+            log_error("wt_loaded", e)
             r["state"][i], r["tries"][i] = 0, r["tries"][i] + 1
             return
-        r["photos"][i] = ph  # canvas items do not own their image - keep it alive here
+        r["photos"][i] = [ph]  # canvas items do not own their image - keep it alive here
         c.itemconfigure(r["items"][i], image=ph)
         c.itemconfigure(r["texts"][i], text="")
         self.wt_border(i, False)     # artwork is on canvas: no artificial page border
         r["state"][i] = 2
+
+    def wt_strip_items(self, r, i):
+        """Every canvas item of one page: the primary item plus any split strips."""
+        try:
+            return (r.get("strips") or {}).get(i) or [r["items"][i]]
+        except Exception:
+            return []
+
+    def wt_split(self, i, im):
+        """Lay out one canvas item per horizontal strip of a tall page.
+
+        The strip images themselves are made in wt_split_tick(), a couple per frame, so the
+        UI thread never uploads a 20 000 px image in one go.
+        """
+        r = self.reader
+        c = r["c"]
+        k = max(1, (im.height + WT_STRIP - 1) // WT_STRIP)
+        items = list((r.get("strips") or {}).get(i) or [r["items"][i]])
+        for it in items[k:]:      # an older, taller load left spare strips behind
+            try:
+                c.delete(it)
+            except Exception:
+                pass
+        items = items[:k]
+        while len(items) < k:     # items are cheap; only the PhotoImages are expensive
+            it = c.create_image(0, 0, anchor="nw", image=page_box())
+            c.tag_bind(it, "<Button-1>", lambda e, i=i: self.wt_retry(i))
+            items.append(it)
+        try:
+            w, h = r["dims"][i]
+            ys = r.get("ys") or self.wt_tops(r)[0]
+            y = ys[i] if i < len(ys) else 0
+            x = max(0, ((r.get("cw") or r.get("width") or w) - w) // 2)
+            for n, it in enumerate(items):
+                c.coords(it, x, y + n * WT_STRIP)
+        except Exception as e:
+            log_error("wt_split", e)
+        r.setdefault("strips", {})[i] = items
+        r["photos"][i] = []
+        r["split"][i] = [im, 0]
+        r["state"][i] = 4        # decoded, strips still being built
+        if i not in r["splitq"]:
+            r["splitq"].append(i)
+
+    def wt_split_tick(self, budget=WT_STRIPS_PER_TICK):
+        """Build and show at most `budget` strip images from the queued tall pages."""
+        r = self.reader
+        q = r.get("splitq") or []
+        if not q or not r.get("c"):
+            return
+        c = r["c"]
+        for _ in range(budget):
+            while q:
+                i = q[0]
+                if (not (r.get("split") or {}).get(i) or i >= len(r["state"])
+                        or r["state"][i] != 4):
+                    q.pop(0)
+                    (r.get("split") or {}).pop(i, None)
+                    continue
+                break
+            if not q:
+                break
+            i = q[0]
+            im, k = r["split"][i]
+            items = (r.get("strips") or {}).get(i) or [r["items"][i]]
+            if k >= len(items):
+                q.pop(0)
+                r["split"].pop(i, None)
+                continue
+            part = im.crop((0, k * WT_STRIP, im.width, min(im.height, (k + 1) * WT_STRIP)))
+            try:
+                ph = ImageTk.PhotoImage(part)
+            except Exception as e:
+                log_error("wt_split_tick", e)
+                q.pop(0)
+                self.wt_clear_strips(i)
+                self.wt_reset_page(i)
+                r["state"][i], r["tries"][i] = 0, r["tries"][i] + 1
+                continue
+            c.itemconfigure(items[k], image=ph)
+            r["photos"].setdefault(i, []).append(ph)
+            k += 1
+            if k == 1:
+                c.itemconfigure(r["texts"][i], text="")
+            if k >= len(items):
+                q.pop(0)
+                r["split"].pop(i, None)
+                self.wt_border(i, False)   # whole page is on canvas now
+                r["state"][i] = 2
+            else:
+                r["split"][i][1] = k
+        r["splitq"] = q
+
+    def wt_split_cancel(self, i):
+        """Forget the pending strips of a page (it scrolled out of reach)."""
+        r = self.reader
+        (r.get("split") or {}).pop(i, None)
+        if r.get("splitq"):
+            r["splitq"] = [j for j in r["splitq"] if j != i]
+
+    def wt_clear_strips(self, i):
+        """Drop every extra strip item of a page - their images and canvas items."""
+        r = self.reader
+        try:
+            items = (r.get("strips") or {}).pop(i, None) or []
+            for it in items[1:]:
+                r["c"].delete(it)
+            (r.get("photos") or {}).pop(i, None)
+            self.wt_split_cancel(i)
+        except Exception as e:
+            log_error("wt_clear_strips", e)
+
+    def wt_reset_page(self, i):
+        """Put a page (all of its strips) back to the placeholder box."""
+        r = self.reader
+        try:
+            ph = page_box()
+            for it in self.wt_strip_items(r, i):
+                r["c"].itemconfigure(it, image=ph)
+            r["c"].itemconfigure(r["texts"][i], text=f"Page {i + 1}")
+            r["photos"].pop(i, None)
+        except Exception as e:
+            log_error("wt_reset_page", e)
 
     def wt_border(self, i, show=True):
         """Page-box outline: visible only for placeholders/failed pages, hidden once the
@@ -4925,13 +3387,11 @@ class App(ctk.CTk):
         r["wgen"] += 1
         r["width"] = self.web_width()
         r["dims"] = self.wt_dims(r["urls"], r["width"])
-        ph = page_box()
-        for i, it in enumerate(r["items"]):
-            c.itemconfigure(it, image=ph)
-            c.itemconfigure(r["texts"][i], text=f"Page {i + 1}")
+        for i in range(len(r["items"])):
+            self.wt_clear_strips(i)   # new width: every strip must be rebuilt
+            self.wt_reset_page(i)
             self.wt_border(i, True)
-        r["photos"].clear()
-        r["state"] = [0 if s in (1, 2) else s for s in r["state"]]
+        r["state"] = [0 if s in (1, 2, 4) else s for s in r["state"]]
         r["tries"] = [0] * len(r["state"])
         r["inflight"] = 0
         if r["zoom"] > 1:
@@ -5340,4 +3800,5 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
+    threading.Thread(target=prune_cache, daemon=True).start()   # cache trim never blocks the UI
     App().mainloop()

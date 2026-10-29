@@ -4,5 +4,6 @@
 customtkinter
 pillow
 beautifulsoup4
+lxml          # fast HTML parser for BeautifulSoup (falls back to html.parser when absent)
 requests
 curl_cffi     # optional: Chrome/Firefox TLS fingerprint for Cloudflare-protected sources

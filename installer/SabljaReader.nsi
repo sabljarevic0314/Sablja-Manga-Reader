@@ -11,7 +11,7 @@ Name "Sablja Reader"
 ; make_setup.ps1 passes the version from SabljaReader.py's APP_VERSION; this fallback is only
 ; for running makensis directly.
 !ifndef APP_VERSION
-  !define APP_VERSION "1.4.0"
+  !define APP_VERSION "1.4.1"
 !endif
 VIProductVersion "${APP_VERSION}.0"
 VIFileVersion "${APP_VERSION}.0"

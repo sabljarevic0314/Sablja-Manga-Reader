@@ -52,12 +52,12 @@ if (-not $mk) {
 Write-Host "Using $mk"
 Push-Location $PSScriptRoot
 try {
-    # Keep the installer version in sync with the app: APP_VERSION lives in SabljaReader.py only.
-    $appPy = Get-Content (Join-Path $root "SabljaReader.py") -Raw
+    # Keep the installer version in sync with the app: APP_VERSION lives in config.py.
+    $appPy = Get-Content (Join-Path $root "config.py") -Raw
     if ($appPy -match '(?m)^APP_VERSION\s*=\s*"([^"]+)"') {
         $appVersion = $Matches[1]
     } else {
-        throw "Could not read APP_VERSION from SabljaReader.py"
+        throw "Could not read APP_VERSION from config.py"
     }
     Write-Host "App version: $appVersion"
     & $mk "/V2" "/DAPP_VERSION=$appVersion" "SabljaReader.nsi"
