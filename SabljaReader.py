@@ -195,8 +195,12 @@ def download_release_asset(info):
         want = int(asset.get("size") or 0)
         if want and size != want:
             raise RuntimeError("download size does not match the release")
+        # Never run an installer we could not verify: GitHub publishes a sha256 digest for
+        # every release asset, so a missing one means something is off.
         digest = str(asset.get("digest") or "")
-        if digest.startswith("sha256:") and h.hexdigest() != digest.split(":", 1)[1].lower():
+        if not digest.startswith("sha256:"):
+            raise RuntimeError("the release has no checksum; download it manually from GitHub")
+        if h.hexdigest() != digest.split(":", 1)[1].lower():
             raise RuntimeError("download checksum does not match the release")
         os.replace(part, dest)
     except Exception:

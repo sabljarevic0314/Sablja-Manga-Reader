@@ -3,6 +3,20 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## 1.4.2 — 2026-10-30
+
+### Fixed
+
+- **MangaHub chapters stopped after 3-6 pages.** Pages and the full chapter list now come from
+  MangaHub's own API; the old HTML scraping is kept as a fallback.
+- **Updates** only start an installer whose SHA-256 checksum matches the GitHub release; a release
+  without a checksum is refused instead of being run unverified.
+- **Library saves** are flushed to disk before replacing `db.json`, so a power cut can't leave it empty.
+
+### Removed
+
+- **Hentai18** source (no longer working).
+
 ## 1.4.1 — 2026-10-29
 
 ### Fixed / faster

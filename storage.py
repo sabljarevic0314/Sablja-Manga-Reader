@@ -42,6 +42,8 @@ def save_db():
     with _DB_WRITE_LOCK:                 # a debounced save must not race the closing write
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(DB, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())         # a power cut after the rename must not leave an empty file
         os.replace(tmp, DB_FILE)
 
 
