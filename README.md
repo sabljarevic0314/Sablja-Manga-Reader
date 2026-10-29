@@ -66,7 +66,8 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
 `curl_cffi` (a browser-compatible HTTP client) is included in `requirements.txt` as an optional
-extra; the app also runs without it.
+extra; the app also runs without it. `lxml` is in there too: BeautifulSoup uses it as the fast
+HTML parser and silently falls back to Python's built-in `html.parser` if it is missing.
 
 A source checkout keeps its **own** `data\` folder next to `SabljaReader.py`. That folder is
 separate from an installed copy's `%LOCALAPPDATA%\Programs\SabljaReader\data`, so copy `db.json`
@@ -90,15 +91,15 @@ Your library, progress and cache in `dist\data` are left untouched.
 ### Releasing on GitHub
 
 The workflow in `.github/workflows/release.yml` builds both files on a Windows runner and attaches
-`SabljaReader-Setup.exe` to the release. Bump `APP_VERSION` in `SabljaReader.py` (the setup script
+`SabljaReader-Setup.exe` to the release. Bump `APP_VERSION` in `config.py` (the setup script
 reads it automatically), then push a version tag:
 
 ```powershell
-git tag 1.4
-git push origin 1.4
+git tag 1.4.1
+git push origin 1.4.1
 ```
 
-`v1.4` works too. The built-in updater compares the release tag with `APP_VERSION`, so keep the
+`v1.4.1` works too. The built-in updater compares the release tag with `APP_VERSION`, so keep the
 tag and the app version in sync (`1.4` and `1.4.0` compare as the same version).
 
 ---
