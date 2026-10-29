@@ -215,6 +215,7 @@
     {
       "id": "mangahub",
       "name": "MangaHub",
+      "api": "mangahub",
       "base_url": "https://mangahub.io",
       "tags": [
         "a.genre-label"
@@ -591,49 +592,6 @@
       "pages": {
         "image": "div.page-break img",
         "attr": [
-          "data-src",
-          "src"
-        ]
-      }
-    },
-    {
-      "id": "hentai18",
-      "name": "Hentai18",
-      "nsfw": true,
-      "base_url": "https://hentai18.net",
-      "tags": [
-        "a.item-tag[href*='/tag/']",
-        "a.item-tag[href*='/category/']"
-      ],
-      "popular": {
-        "url": "/?page={page}",
-        "item": "div.item",
-        "title": "h3.title a",
-        "cover": "img.lazy, img",
-        "cover_attr": [
-          "data-original",
-          "data-src",
-          "src"
-        ]
-      },
-      "details": {
-        "title": "h1",
-        "description": "div.desc, div.summary-content",
-        "cover": "div.hentai-cover img",
-        "cover_attr": [
-          "data-original",
-          "data-src",
-          "src"
-        ]
-      },
-      "chapters": {
-        "item": "#chapter-list a, .chapter-list a",
-        "newest_first": false
-      },
-      "pages": {
-        "image": ".chapter-content img",
-        "attr": [
-          "data-original",
           "data-src",
           "src"
         ]

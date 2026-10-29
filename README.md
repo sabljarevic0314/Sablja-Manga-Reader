@@ -198,7 +198,8 @@ page requests); HTTP 429 responses honour `Retry-After` and back off automatical
 change their HTML regularly; if one stops working, the selectors in `sources.json` are the
 first place to look.
 
-MangaHub paginates its listing and reads the full chapter archive, not only the recent tab.
+MangaHub paginates its listing. Its `api: mangahub` adapter reads the full chapter list and every page
+of a chapter from the site's own API (the chapter HTML only carries the first few images).
 MangaTown and MangaDoom also paginate their listings and expose their full chapter archives.
 MangaTown spreads a chapter
 across one URL per page, so its `page_urls` selector reads the page list and fetches those
