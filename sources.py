@@ -319,7 +319,10 @@ class Source:
 
 
     def soup(self, url):
-        text = self.get(url).text
+        return self._parse(self.get(url).text)
+
+    @staticmethod
+    def _parse(text):
         try:
             return BeautifulSoup(text, "lxml")
         except Exception:            # lxml missing: the stdlib parser still works, only slower
@@ -465,6 +468,10 @@ class Source:
                 chs = self._chapters(fut.result(), c) or chs
             except Exception:
                 pass
+        if self.api == "mangahub":
+            api_chs = self._mh_chapters(url)
+            if len(api_chs) > len(chs):
+                chs = api_chs
         if c.get("newest_first", True):
             chs.reverse()
         return {"title": title, "description": description, "cover": cover, "chapters": chs, "genres": genres}
@@ -476,6 +483,8 @@ class Source:
             return self._wt_pages(url)
         if self.api == "fanfox":
             return self._ff_pages(url)
+        if self.api == "mangahub":
+            return self._mh_pages(url)
         p = self.d["pages"]
         if p.get("url_suffix"):
             url = url.rstrip("/") + p["url_suffix"]
@@ -510,10 +519,13 @@ class Source:
                                 seen.add(u)
                                 out.append(u)
             return out
-        for i in self.soup(url).select(p["image"]):
+        return self._page_imgs(self.soup(url), p)
+
+    def _page_imgs(self, soup, p):
+        out = []
+        for i in soup.select(p["image"]):
             u = self.abs(attr(i, p.get("attr", IMG_ATTRS)))
-            if u and u not in seen:
-                seen.add(u)
+            if u and u not in out:
                 out.append(u)
         return out
 
@@ -731,6 +743,92 @@ class Source:
         with ThreadPoolExecutor(max_workers=4) as ex:
             urls = list(ex.map(one, range(1, total + 1)))
         return [u for u in urls if u]
+
+    # ---- MangaHub (chapter HTML only carries the first few images; the site's reader
+    # asks its GraphQL API for the rest, so a chapter used to stop after 3-6 pages) ----
+    MH_API = "https://api.mghcdn.com/graphql"
+    MH_CDN = "https://imgx.mghcdn.com/"
+
+    def _mh_gql(self, query, referer):
+        """POST one GraphQL query. The API wants the mhub_access cookie that the site's
+        HTML pages set, sent back as a header; fetch a mangahub.io page first (same thread,
+        same session) so the cookie exists."""
+        s = self._session()
+        try:
+            token = s.cookies.get("mhub_access") or ""
+        except Exception:  # same cookie name on two domains
+            token = next((ck.value for ck in s.cookies.jar if ck.name == "mhub_access"), "")
+        h = dict(UA)
+        h.update({"Referer": referer, "Origin": self.base, "Content-Type": "application/json"})
+        if token:
+            h["x-mhub-access"] = token
+        self._throttle(self._host(self.MH_API), float(self.d.get("request_delay", 0.05)))
+        r = s.post(self.MH_API, data=json.dumps({"query": query}), headers=h, timeout=25)
+        r.raise_for_status()
+        j = r.json()
+        if j.get("errors") and not j.get("data"):
+            raise RuntimeError(f"MangaHub API: {str(j['errors'])[:300]}")
+        return j.get("data") or {}
+
+    @staticmethod
+    def _mh_num(n):
+        n = float(n)
+        return str(int(n)) if n.is_integer() else str(n)
+
+    def _mh_chapters(self, url):
+        """Full chapter list, newest first (same order the HTML selector produces)."""
+        m = re.search(r"/manga/([^/?#]+)", url)
+        if not m:
+            return []
+        slug = m.group(1)
+        try:
+            d = self._mh_gql('{manga(x:m01,slug:"%s"){chapters{number,title}}}' % slug, url)
+        except Exception as e:
+            log_error("MangaHub chapters", e)
+            return []
+        out, seen = [], set()
+        rows = sorted((d.get("manga") or {}).get("chapters") or [],
+                      key=lambda ch: float(ch.get("number") or 0), reverse=True)
+        for ch in rows:
+            try:
+                num = self._mh_num(ch.get("number"))
+            except (TypeError, ValueError):
+                continue
+            if num in seen:
+                continue
+            seen.add(num)
+            out.append({"title": f"Chapter {num}", "url": f"{self.base}/chapter/{slug}/chapter-{num}"})
+        return out
+
+    def _mh_page_urls(self, pages):
+        if isinstance(pages, str):
+            pages = json.loads(pages)
+        if not isinstance(pages, dict):
+            return []
+        if isinstance(pages.get("i"), list):  # {"p": "slug/12/", "i": ["1.jpg", "2.jpg", ...]}
+            items = [str(pages.get("p") or "") + str(i) for i in pages["i"]]
+        else:  # older shape: {"1": "slug/12/1.jpg", "2": ...}
+            items = [str(v) for k, v in sorted(pages.items(), key=lambda kv: float(kv[0])
+                                                if re.fullmatch(r"\d+(?:\.\d+)?", str(kv[0])) else 0.0)]
+        return [u if u.startswith("http") else self.MH_CDN + u.lstrip("/") for u in items if u]
+
+    def _mh_pages(self, url):
+        m = re.search(r"/chapter/([^/?#]+)/chapter-(\d+(?:\.\d+)?)", url)
+        html_text = ""
+        if m:
+            q = '{chapter(x:m01,slug:"%s",number:%s){pages}}' % (m.group(1), m.group(2))
+            for reload_key in ("", "?reloadKey=1"):  # second try asks the site for a fresh API key
+                try:
+                    html_text = self.get(url + reload_key).text  # also sets the mhub_access cookie
+                    urls = self._mh_page_urls((self._mh_gql(q, url).get("chapter") or {}).get("pages"))
+                    if urls:
+                        return urls
+                except Exception as e:
+                    log_error("MangaHub pages", e)
+        # API unavailable: keep the old behaviour (whatever images the HTML carries).
+        if not html_text:
+            html_text = self.get(url).text
+        return self._page_imgs(self._parse(html_text), self.d["pages"])
 
 
 SOURCES = {}
