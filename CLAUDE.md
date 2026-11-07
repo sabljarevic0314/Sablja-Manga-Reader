@@ -90,3 +90,15 @@ The release workflow builds and attaches the installer.
 - Page appends use `grid_cards(..., append=True)`.
 - Don't add per-chapter widgets to the reader. The chapter picker is a Tk `Listbox` with a number-entry path.
 - The app is Windows-only in practice (`os.startfile`, `winreg`, `\` paths in `data\`).
+
+## Git identity
+
+- Commits in this repo are authored as the owner: `Sabljarevic <sabljarevic@protonmail.com>` (GitHub user
+  `sabljarevic0314`). Claude is credited only through the `Co-Authored-By` trailer.
+- Before the first commit of a session, run `git config user.name` and `git config user.email`. If either is
+  empty or differs from the values above, set them for this repo only (`git config user.name ...`,
+  `git config user.email ...`, no `--global`).
+- Never commit as anyone else. Do not use a placeholder name, another person's address, or any
+  `<name>@users.noreply.github.com` address that is not the owner's: GitHub links such an address to
+  that stranger's real account and lists them as a contributor (this happened once with commit `6bb5a7a`, 1.4.1).
+- Never rewrite history or force-push unless the owner explicitly asks.
