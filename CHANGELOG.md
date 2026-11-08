@@ -3,6 +3,27 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## 1.4.3 — 2026-11-08
+
+### Added
+
+- **Auto-scroll hotkey** (webtoon mode): **A** starts and stops, **,** / **.** change between four
+  speed presets. The default speed is in Settings.
+- **New-chapter notifications** (off by default): a sidebar count shows unread series; switching on
+  *Settings > Notifications* adds a Windows toast, checked every 30 minutes while the app is open. Nothing
+  runs after you close the window and nothing starts with Windows. New optional dependency: `pystray`.
+- **Panic key and optional PIN**: F12 or the Hide button hides the window; a PIN can lock the app on
+  start and after hiding.
+- **Same series from different sources** is shown as one Library card with a source picker (nothing is
+  merged in `db.json`).
+
+### Changed
+
+- **New app icon**: the crossed-sabres SR badge (exe, taskbar, window and sidebar).
+- **Backgrounds cut down to two**: *Black* and *White*. The reader no longer has its own setting;
+  it follows the app. Graphite matte, Ink matte, Paper and Off are gone; saved settings move to Black,
+  and Paper to White.
+
 ## 1.4.2 — 2026-10-30
 
 ### Fixed

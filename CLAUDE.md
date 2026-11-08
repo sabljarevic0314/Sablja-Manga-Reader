@@ -1,6 +1,6 @@
 # Sablja Reader — notes for Claude
 
-Windows desktop manga/webtoon reader written in Python (customtkinter + Tk). Current version: **1.4.1**
+Windows desktop manga/webtoon reader written in Python (customtkinter + Tk). Current version: **1.4.3**
 (`config.py`, `APP_VERSION`). Repo: `sabljarevic0314/Sablja-Manga-Reader`.
 
 **Read `AGENTS.md` before touching any source.** It holds the non-negotiable rules for sources
@@ -17,6 +17,7 @@ AGENTS.md is the law.
 | `sources.py` | `Source` class: HTTP with per-host pacing and 429 backoff, generic selector-based listing/details/chapters/pages, the `api:` adapters (`mangadex`, `webtoons`, `fanfox`, `mangahub`), thread pools (`NET_POOL`, `DETAIL_POOL`, `IMG_POOL`, `PAGE_POOL`), `load_img` / `THUMB_CACHE`, `rebuild_sources()`. |
 | `sources.json` | **The only file to edit to add or fix a source.** Hot-reloaded from the app (Settings → Reload sources.json). |
 | `downloads.py` | Chapter download to CBZ/folders. |
+| `desktop.py` | Tray icon + toasts (`pystray`, optional, only while notifications are on), PIN hashing, `norm_title` for grouping duplicates. |
 | `textures.py`, `assets.py` | Theme palettes, paper textures, embedded icons/images. |
 | `autoprobe.py` | `python autoprobe.py <listing-url>`: probes a site and suggests selectors for a new source. |
 | `build.ps1`, `SabljaReader.spec` | PyInstaller build to `dist\SabljaReader.exe`, copies `sources.json` into `dist\`. |

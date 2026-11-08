@@ -1,7 +1,7 @@
 # Sablja Reader
 
-A desktop manga / manhwa / webtoon reader for Windows. Graphite UI with a warm
-*Paper* theme in **Settings → Background**, webtoon (vertical strip),
+A desktop manga / manhwa / webtoon reader for Windows. Black UI with a
+*White* look in **Settings → Background**, webtoon (vertical strip),
 single, double and right-to-left paged reading, a library with folders and bookmarks, downloads,
 a History section and progress tracking — plus a built-in random manga roll (Randomizer).
 
@@ -132,8 +132,35 @@ the pointer sits from the middle of the view, the faster it goes, and moving bac
 middle slows it down smoothly. Middle-click again (or press **Esc**, scroll the wheel, or
 click normally) to stop. This is especially handy for long webtoon chapters.
 
-Reader background is its own setting (*Settings > Reading > Reader background*) and starts on
-**Graphite matte**, independent of the app's Paper/Graphite theme.
+**Hotkey auto-scroll (webtoon mode):** press **A** to scroll at a steady speed and **A** again (or
+any other key, the wheel or a click) to stop. **,** and **.** (or **[** and **]**) step through the
+presets *Slow, Medium, Fast, Very fast*; the default lives in *Settings > Reading*. It stops by itself
+at the end of the chapter.
+
+The reader follows the app's background (*Settings > Background*): **Black** or **White**.
+
+### New-chapter notifications (optional)
+
+The Library shows a badge on covers with unread chapters, plus a count next to *Library* in the sidebar.
+Switch on *Settings > Notifications* to also get a Windows toast when a favourite gets new chapters:
+the app then checks every 30 minutes **while it is open** and shows a tray icon for the toasts. It is off
+by default, closing the window always quits the app, and nothing runs in the background or starts with
+Windows. Series are compared against the chapter count the app last saw, so nothing is announced the
+first time it sees a series. Needs the optional `pystray` package (bundled in the exe).
+
+### Privacy: panic key and PIN
+
+**F12** (changeable) or the **Hide** button in the top bar hides the window at once (it minimizes,
+or leaves the taskbar when the notification tray icon is on). An optional **PIN** (*Settings > Privacy*)
+then covers the app until it is entered; five wrong tries in a row wait 30 seconds, and toasts never
+show titles while locked. The PIN only hides the window: it does not encrypt your library or downloads.
+
+### Same series from several sources
+
+If the same title is in your library from different sources, the Library shows one card (marked
+*N sources*) led by the copy you read last. Right-click it for *Open on…* a specific source, or
+*Show each source separately*. Nothing is merged in `db.json`; progress stays per source. Turn it off in
+*Settings > Library*.
 
 ### Shuffle (inside a source)
 

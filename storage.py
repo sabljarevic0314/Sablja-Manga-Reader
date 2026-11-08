@@ -110,10 +110,9 @@ def save_update_state(state: dict):
 
 def S(k) -> Any:
     v = DB["set"].get(k, DEFAULTS[k])
-    if v == "Paper white":                 # renamed in 1.2 while it was still an experiment
-        v = "Paper"
-    if k in ("paper", "reader_paper") and v not in PAPERS:  # older builds saved invalid names
-        v = DEFAULTS[k]
+    if k == "paper" and v not in PAPERS:
+        # 1.4.3 cut the backgrounds down to Black and White: the old light ones become White, the rest Black
+        v = "White" if v in ("Paper", "Paper white") else DEFAULTS[k]
     return v
 
 
