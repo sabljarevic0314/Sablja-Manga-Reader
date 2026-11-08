@@ -6,4 +6,5 @@ pillow
 beautifulsoup4
 lxml          # fast HTML parser for BeautifulSoup (falls back to html.parser when absent)
 requests
+pystray       # optional: tray icon + new-chapter toasts
 curl_cffi     # optional: Chrome/Firefox TLS fingerprint for Cloudflare-protected sources

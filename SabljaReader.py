@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 import requests
 from PIL import Image, ImageTk
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 import customtkinter as ctk
 
 from assets import make_icon, make_icon_file
@@ -12,7 +12,9 @@ from textures import paper_tile, paper_avg
 from config import (BASE, DATA, CACHE, SRC_FILE,
                     CARD_W, CARD_H, SMALL_W, SMALL_H, CARD_CELL,
                     SMALL_CELL, MODES, ZOOMS, PAPERS, APP_VERSION,
-                    PAGE_BORDER, PAGE_GAP, REPO_URL, GITHUB_API, UPDATE_ASSET)
+                    PAGE_BORDER, PAGE_GAP, REPO_URL, GITHUB_API, UPDATE_ASSET,
+                    AUTO_SPEEDS, PANIC_KEYS, NOTIFY_EVERY_MS)
+from desktop import HAVE_TRAY, Tray, pin_hash, pin_ok, norm_title
 from storage import (DB, S, save_db, save_db_soon, log_error, load_update_state,
                      save_update_state, pkey, cached_genres, remember_genres,
                      cache_path, prune_cache, dl_records, backup_db)
@@ -22,7 +24,7 @@ from sources import (SOURCES, Source, LOCAL, rebuild_sources, fetch_pages, load_
                      local_path, downloaded_manga)
 from downloads import DL_Q, JOBS, dl_path, next_job_id
 
-# ---------------- theme (silver on graphite) ----------------
+# ---------------- theme (silver on black, or white) ----------------
 # The chrome colours follow the chosen background, so the flat menu areas sit on the
 # same surface as the textured sidebar/reader instead of fighting it. theme_pick()
 # swaps these when the Background setting changes.
@@ -30,23 +32,17 @@ ROLES = ("BG", "SIDE", "PANEL", "CARD", "CARD_HI", "BTN", "BTN_HI", "LINE", "REA
          "TEXT", "MUTED", "SILVER", "SILVER_HI", "SILVER_DIM", "INK")
 _TXT_DARK = {"TEXT": "#e7e9ed", "MUTED": "#8a8f99", "SILVER": "#c5cad3",
              "SILVER_HI": "#e8ebf0", "SILVER_DIM": "#7d838e", "INK": "#14151a"}
-_TXT_PAPER = {"TEXT": "#37342c", "MUTED": "#6f6a5d", "SILVER": "#575245",
-              "SILVER_HI": "#2a2822", "SILVER_DIM": "#8b8574", "INK": "#f4efe3"}
+_TXT_LIGHT = {"TEXT": "#1f2126", "MUTED": "#6a707b", "SILVER": "#3d424b",
+              "SILVER_HI": "#14151a", "SILVER_DIM": "#8a909b", "INK": "#f4f5f7"}
 PALETTES = {
-    "Off": {"BG": "#131417", "SIDE": "#0f1012", "PANEL": "#1b1c20", "CARD": "#222428",
-            "CARD_HI": "#2d2f36", "BTN": "#2b2d33", "BTN_HI": "#3a3d45", "LINE": "#32353c",
-            "READER_BG": "#0c0c0e", **_TXT_DARK},
-    "Graphite matte": {"BG": "#1d1e22", "SIDE": "#1c1d21", "PANEL": "#24252a", "CARD": "#2b2d33",
-                       "CARD_HI": "#373941", "BTN": "#2d2f35", "BTN_HI": "#3c3f47", "LINE": "#35383f",
-                       "READER_BG": "#1a1b1f", **_TXT_DARK},
-    "Ink matte": {"BG": "#101113", "SIDE": "#0f1012", "PANEL": "#17181c", "CARD": "#1e2024",
-                  "CARD_HI": "#292b31", "BTN": "#202226", "BTN_HI": "#2e3038", "LINE": "#272a30",
-                  "READER_BG": "#0e0e10", **_TXT_DARK},
-    "Paper": {"BG": "#ded7c6", "SIDE": "#d8d1bf", "PANEL": "#eae3d2", "CARD": "#f4eedd",
-              "CARD_HI": "#e2dbc9", "BTN": "#e3dccb", "BTN_HI": "#d3cbb6", "LINE": "#b3aa93",
-              "READER_BG": "#8f8878", **_TXT_PAPER},
+    "Black": {"BG": "#101113", "SIDE": "#0f1012", "PANEL": "#17181c", "CARD": "#1e2024",
+              "CARD_HI": "#292b31", "BTN": "#202226", "BTN_HI": "#2e3038", "LINE": "#272a30",
+              "READER_BG": "#0e0e10", **_TXT_DARK},
+    "White": {"BG": "#eceef1", "SIDE": "#e4e6ea", "PANEL": "#f4f5f7", "CARD": "#ffffff",
+              "CARD_HI": "#e9ebef", "BTN": "#e2e4e8", "BTN_HI": "#d1d4da", "LINE": "#c4c8d0",
+              "READER_BG": "#d5d8de", **_TXT_LIGHT},
 }
-LIGHT_PAPERS = ("Paper",)
+LIGHT_PAPERS = ("White",)
 BG, SIDE, PANEL, CARD, CARD_HI = "#1d1e22", "#1c1d21", "#24252a", "#2b2d33", "#373941"
 BTN, BTN_HI, LINE = "#2d2f35", "#3c3f47", "#35383f"
 SILVER, SILVER_HI, SILVER_DIM, INK = "#c5cad3", "#e8ebf0", "#7d838e", "#14151a"
@@ -65,7 +61,7 @@ def theme_pick(paper):
     widget against its theme's window colour, so a light palette needs "light" or the
     scroll areas and menu frames stay dark.
     """
-    want = PALETTES.get(paper) or PALETTES["Off"]
+    want = PALETTES.get(paper) or PALETTES["Black"]
     g = globals()
     for r in ROLES:
         g[r] = want[r]
@@ -78,7 +74,7 @@ def theme_pick(paper):
 # ---------------- storage ----------------
 def reader_muted():
     """Muted text for overlay labels on the reader's own background."""
-    return "#6f6a5d" if S("reader_paper") in LIGHT_PAPERS else "#9aa0ab"
+    return "#6a707b" if S("paper") in LIGHT_PAPERS else "#9aa0ab"
 
 
 def genre_text(genres, limit=2):
@@ -107,6 +103,8 @@ MMB_MAX = 1150.0           # px/s at the top/bottom edge of the viewport
 MMB_TICK = 16              # ms between auto-scroll frames
 MMB_TAU_UP = 0.16          # s - time constant while speeding up (snappy)
 MMB_TAU_DOWN = 0.42        # s - time constant while slowing down (soft landing)
+AUTO_SLOWER = ("bracketleft", "comma")      # reader hotkeys that step the auto-scroll preset
+AUTO_FASTER = ("bracketright", "period")
 _PH = None
 
 
@@ -322,7 +320,7 @@ class App(ctk.CTk):
         self._win_geom = "1280x800"
         if self._fs:
             self.after(60, self.start_fullscreen)
-        ico = os.path.join(DATA, "sablja2.ico")   # new name so the new logo replaces an old cached icon
+        ico = os.path.join(DATA, "sablja3.ico")   # new name so the new logo replaces an old cached icon
         try:
             make_icon_file(ico)
             self.after(300, lambda: self.iconbitmap(ico))  # CTk sets its own icon at ~200ms, so set ours after
@@ -351,6 +349,9 @@ class App(ctk.CTk):
         self.rand_mode, self._rand_open, self.rdm_tok = False, False, 0
         self.rand_hist, self.rand_i, self.rand_seen = [], -1, set()
         self._fresh, self._fresh_thr, self._fresh_last = {}, None, 0
+        self._tray, self._quitting = None, False
+        self._locked, self._lock_win, self._pin_entry, self._pin_msg = False, None, None, None
+        self._pin_fails, self._pin_block, self._hint, self._hint_job = 0, 0.0, None, None
         self.nav_build()
         rebuild_sources()
         self.bind_all("<MouseWheel>", self.on_wheel, add="+")
@@ -364,6 +365,12 @@ class App(ctk.CTk):
         self.after(60, self.poll)
         self.after(500, self.watch)
         self.after(3000, lambda: self.check_updates())
+        self.bind("<Map>", self._on_map, add="+")
+        if S("notify_new"):
+            self.setup_tray()           # the tray icon exists only while notifications are on
+        if self.pin_set() and S("pin_on_start"):
+            self.lock_app()
+        self.after(20000, self.notify_tick)
 
     def start_fullscreen(self):
         self.set_borderless(True, save_geom=False)
@@ -485,6 +492,10 @@ class App(ctk.CTk):
                                      corner_radius=6, fg_color="transparent", hover_color=BTN_HI,
                                      text_color=MUTED, font=("Segoe UI", 11, "bold"))
         self.win_min.pack(side="right", padx=4, pady=4)
+        self.win_hide = ctk.CTkButton(self.winbar, text="Hide", command=self.hide_window, width=44, height=24,
+                                      corner_radius=6, fg_color="transparent", hover_color=BTN_HI,
+                                      text_color=MUTED, font=("Segoe UI", 11))
+        self.win_hide.pack(side="right", padx=4, pady=4)
 
         self.views = {n: ctk.CTkFrame(self.main, fg_color="transparent", corner_radius=0)
                       for n in ["Library", "History", "Rating", "Sources", "Search", "Randomizer",
@@ -549,10 +560,179 @@ class App(ctk.CTk):
         self.after(350, self.watch)
 
     def close(self):
+        self.quit_app()               # closing the window always ends the app
+
+    def quit_app(self):
+        self._quitting = True
+        try:
+            if self.cur == "Reader":
+                self.save_reader()
+            save_db()                # a pending save_db_soon must not be lost on exit
+        finally:
+            if self._tray:
+                self._tray.stop()    # pystray's thread is not a daemon: it would keep the process alive
+            self.destroy()
+
+    # ----- tray, panic key, PIN lock -----
+    def setup_tray(self):
+        entries = [("Open Sablja Reader", self.show_window, True),
+                   ("Check for new chapters", lambda: self.check_new_chapters(force=True), False),
+                   ("Hide window", self.hide_window, False),
+                   ("Quit", lambda: self.after(10, self.quit_app), False)]
+        tray = Tray(make_icon(64), lambda fn: Q.put((fn, ())), entries)
+        self._tray = tray if tray.start() else None
+
+    def pin_set(self):
+        return bool(S("pin"))
+
+    def hide_window(self, lock=None):
+        """Panic key / Hide button / tray: stop what is moving, lock if a PIN is set, get off screen."""
+        self.mmb_stop()
         if self.cur == "Reader":
             self.save_reader()
-        save_db()                    # a pending save_db_soon must not be lost on exit
-        self.destroy()
+        if self.pin_set() and (S("pin_on_hide") if lock is None else lock):
+            self.lock_app()
+        try:
+            if self._tray:
+                self.withdraw()      # gone from the taskbar too; the tray icon brings it back
+            else:
+                self.minimize_window()
+        except Exception:
+            pass
+
+    def show_window(self):
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
+        self._focus_pin()
+
+    def _on_map(self, e):
+        if e.widget is self:
+            self._focus_pin()
+
+    def _focus_pin(self):
+        if self._locked and self._pin_entry is not None:
+            self.after(60, self._focus_pin_now)
+
+    def _focus_pin_now(self):
+        try:                         # the prompt may be gone by now (unlocked within 60 ms)
+            if self._locked and self._pin_entry is not None:
+                self._pin_entry.focus_force()
+        except Exception:
+            pass
+
+    def lock_app(self):
+        """Cover the whole window with a PIN prompt (the UI underneath keeps running, unseen)."""
+        if self._locked or not self.pin_set():
+            return
+        self._locked = True
+        f = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        f.place(x=0, y=0, relwidth=1, relheight=1)
+        f.tkraise()
+        box = ctk.CTkFrame(f, fg_color="transparent")
+        box.place(relx=0.5, rely=0.46, anchor="center")
+        ctk.CTkLabel(box, text="", image=ctk.CTkImage(make_icon(128), size=(84, 84))).pack(pady=(0, 10))
+        ctk.CTkLabel(box, text="Sablja Reader is locked", font=("Segoe UI", 18, "bold"),
+                     text_color=SILVER_HI).pack(pady=(0, 14))
+        self._pin_entry = entry(box, show="\u2022", width=220, placeholder_text="PIN", justify="center")
+        self._pin_entry.pack(pady=4)
+        self._pin_entry.bind("<Return>", self.try_unlock)
+        self._pin_msg = ctk.CTkLabel(box, text="", text_color=MUTED, font=("Segoe UI", 11))
+        self._pin_msg.pack(pady=2)
+        btn(box, "Unlock", self.try_unlock, primary=True, width=220).pack(pady=(4, 6))
+        btn(box, "Close app", self.quit_app, width=220, fg_color="transparent", text_color=SILVER_DIM,
+            hover_color=PANEL).pack()
+        self._lock_win = f
+        self._focus_pin()
+
+    def try_unlock(self, _e=None):
+        if not self._locked or time.time() < self._pin_block:
+            return
+        pin = self._pin_entry.get()
+        self._pin_entry.delete(0, "end")
+        if pin_ok(pin, S("pin")):
+            self._locked, self._pin_fails = False, 0
+            self._pin_entry = self._pin_msg = None
+            if self._lock_win is not None:
+                self._lock_win.destroy()
+                self._lock_win = None
+            return
+        self._pin_fails += 1
+        if self._pin_fails >= 5:       # slow down guessing: 30 s after five misses in a row
+            self._pin_fails, self._pin_block = 0, time.time() + 30
+            self._pin_msg.configure(text="Too many tries. Wait 30 seconds.")
+        else:
+            self._pin_msg.configure(text="Wrong PIN")
+
+    def ask_pin(self, prompt):
+        pin = simpledialog.askstring("PIN", prompt, show="\u2022", parent=self)
+        if pin is None:
+            return False
+        if pin_ok(pin, S("pin")):
+            return True
+        messagebox.showwarning("PIN", "That PIN is not correct.", parent=self)
+        return False
+
+    def set_pin(self):
+        if self.pin_set() and not self.ask_pin("Enter your current PIN:"):
+            return
+        new = simpledialog.askstring("PIN", "New PIN (at least 4 characters):", show="\u2022", parent=self)
+        if new is None:
+            return
+        if len(new) < 4:
+            messagebox.showwarning("PIN", "The PIN needs at least 4 characters.", parent=self)
+            return
+        if simpledialog.askstring("PIN", "Type the new PIN again:", show="\u2022", parent=self) != new:
+            messagebox.showwarning("PIN", "The two PINs did not match. Nothing was changed.", parent=self)
+            return
+        self.setv("pin", pin_hash(new))
+        self.refresh_pin_ui()
+
+    def remove_pin(self):
+        if self.pin_set() and self.ask_pin("Enter your PIN to remove the lock:"):
+            self.setv("pin", "")
+            self.refresh_pin_ui()
+
+    def refresh_pin_ui(self):
+        try:
+            on = self.pin_set()
+            self.pin_lbl.configure(text="PIN is set" if on else "No PIN")
+            self.pin_set_btn.configure(text="Change PIN…" if on else "Set PIN…")
+            self.pin_rm_btn.configure(state="normal" if on else "disabled")
+        except Exception:
+            pass
+
+    def toggle_notify(self):
+        """Notifications on = tray icon (it delivers the toasts) + the 30-minute check, only while the app is open."""
+        on = bool(self.sw_notify.get())
+        self.setv("notify_new", on)
+        if on and not self._tray:
+            self.setup_tray()
+            if not self._tray:
+                self.sw_notify.deselect()
+                self.setv("notify_new", False)
+        elif not on and self._tray:
+            self._tray.stop()
+            self._tray = None
+
+    def auto_hint(self, text):
+        """A small pill at the top of the reader that fades out by itself."""
+        try:
+            lab = self._hint
+            if lab is None or not lab.winfo_exists():
+                lab = self._hint = ctk.CTkLabel(self.rbody, text="", corner_radius=14, fg_color=SILVER,
+                                                text_color=INK, font=("Segoe UI", 12, "bold"), height=28)
+            lab.configure(text="   " + text + "   ")
+            lab.place(relx=0.5, y=14, anchor="n")
+            lab.lift()
+            if self._hint_job:
+                self.after_cancel(self._hint_job)
+            self._hint_job = self.after(1600, lambda: lab.winfo_exists() and lab.place_forget())
+        except Exception:
+            pass
 
     def show(self, name):
         if self.cur == "Reader" and name != "Reader":
@@ -623,6 +803,9 @@ class App(ctk.CTk):
             rect = c.create_rectangle(12, y, w - 12, y + 38, fill="", outline="", tags=(tag,))
             txt = c.create_text(28, y + 19, anchor="w", text=n, fill=MUTED, font=("Segoe UI", 13), tags=(tag,))
             self._nav_items[n] = (rect, txt)
+            if n == "Library" and self._fresh:      # series with chapters you have not read
+                c.create_text(w - 26, y + 19, anchor="e", text=str(len(self._fresh)), fill=SILVER_HI,
+                              font=("Segoe UI", 11, "bold"), tags=(tag,))
             self.nav[n] = True
             c.tag_bind(tag, "<Button-1>", lambda e, n=n: self.nav_click(n))
             c.tag_bind(tag, "<Enter>", lambda e, n=n: self.nav_hover(n, True))
@@ -778,6 +961,10 @@ class App(ctk.CTk):
             ctk.CTkLabel(card, text=f"\U0001f195{badge}", corner_radius=9, fg_color=BTN_HI, text_color=SILVER_HI,
                          font=("Segoe UI", 10, "bold"), width=26, height=18, bg_color=PANEL
                          ).place(relx=1.0, rely=0.0, x=-10, y=8, anchor="ne")
+        if m.get("_alts"):
+            ctk.CTkLabel(card, text=f"{len(m['_alts']) + 1} sources", corner_radius=9, fg_color=BTN_HI,
+                         text_color=SILVER_HI, font=("Segoe UI", 10, "bold"), width=64, height=18,
+                         bg_color=PANEL).place(relx=0.0, rely=0.0, x=10, y=8, anchor="nw")
         t = m["title"] if len(m["title"]) < 46 else m["title"][:43] + "…"
         ttl = ctk.CTkLabel(card, text=t, wraplength=iw - 6, height=34 if small else 44, font=("Segoe UI", 11 if small else 12), text_color=TEXT)
         show_genres = S("card_genres")
@@ -867,6 +1054,8 @@ class App(ctk.CTk):
             shown = [b for b in bms if not b.get("folder")]
         else:
             shown = [b for b in bms if b.get("folder") == self.lib_folder]
+        if self.lib_folder != DL_VIEW_CHIP:
+            shown = self.group_library(shown)
         if not shown:
             msg = ("Nothing downloaded yet.\nUse the ⬇ Download button on a manga's page."
                    if self.lib_folder == DL_VIEW_CHIP else
@@ -974,7 +1163,7 @@ class App(ctk.CTk):
     # ----- new-chapter check (bookmarks) -----
     def new_chapter_count(self, m):
         try:
-            return self._fresh.get(pkey(m), {}).get("n", 0)
+            return max(self._fresh.get(pkey(x), {}).get("n", 0) for x in [m, *(m.get("_alts") or [])])
         except Exception:
             return 0
 
@@ -991,7 +1180,7 @@ class App(ctk.CTk):
         self._fresh_last = now
 
         def run():
-            out = {}
+            out, totals = {}, {}
             for b in list(DB["bookmarks"]):
                 src = SOURCES.get(b.get("source"))
                 if not src or not b.get("url"):
@@ -1001,6 +1190,8 @@ class App(ctk.CTk):
                 except Exception:
                     continue
                 key = pkey(b)
+                if chs:
+                    totals[key] = len(chs)      # baseline for the toast: every checked series, caught up or not
                 prog = DB["progress"].get(key, {})
                 seen = set(prog.get("read") or [])
                 cur = prog.get("chapter")
@@ -1013,16 +1204,65 @@ class App(ctk.CTk):
                 n = len(chs) - 1 - i_last
                 if n > 0:
                     out[key] = {"n": n}
-            Q.put((self.apply_fresh, (out, None)))
+            Q.put((self.apply_fresh, (out, totals)))
 
         self._fresh_thr = threading.Thread(target=run, daemon=True)
         self._fresh_thr.start()
 
-    def apply_fresh(self, out, _=None):
+    def apply_fresh(self, out, totals=None):
         old = dict(self._fresh)
         self._fresh = out
-        if self.cur == "Library" and old != out:
-            self.refresh_library()
+        self.announce_new(out, totals or {})
+        try:
+            self.notify_lbl.configure(text=f"Last check {time.strftime('%H:%M')}: "
+                                           f"{len(out)} series with unread chapters")
+        except Exception:
+            pass
+        if old != out:
+            self.sched_paint_side()
+            if self.cur == "Library":
+                self.refresh_library()
+
+    def announce_new(self, out, totals):
+        """Toast for chapters that appeared since the last check.
+
+        db.json remembers each series' chapter count ("chapter_seen"). A series seen for the first time
+        only sets that baseline, so installing this never floods you with old chapters."""
+        seen = DB["meta"].setdefault("chapter_seen", {})
+        names = {pkey(b): b["title"] for b in DB["bookmarks"]}
+        fresh = []
+        for key, total in totals.items():
+            prev = seen.get(key)
+            if prev is not None and total > prev and key in out:
+                fresh.append((names.get(key, "?"), total - prev))
+            if prev is None or total > prev:
+                seen[key] = total
+        save_db_soon()
+        if not fresh or not S("notify_new") or not self._tray:
+            return
+        n = sum(c for _, c in fresh)
+        if self._locked:          # a toast must not show titles while the app is locked
+            self._tray.notify("Sablja Reader", f"{n} new chapter{'s' if n != 1 else ''}")
+            return
+        shown = ", ".join(f"{t} (+{c})" for t, c in fresh[:3])
+        if len(fresh) > 3:
+            shown += f" and {len(fresh) - 3} more"
+        self._tray.notify(f"{n} new chapter{'s' if n != 1 else ''}", shown)
+
+    def check_now(self):
+        try:
+            self.notify_lbl.configure(text="Checking…")
+        except Exception:
+            pass
+        self.check_new_chapters(force=True)
+
+    def notify_tick(self):
+        """Background check while the app runs (window open, hidden or in the tray)."""
+        try:
+            if S("notify_new"):
+                self.check_new_chapters(force=True)
+        finally:
+            self.after(NOTIFY_EVERY_MS, self.notify_tick)
 
     # ----- rating -----
     def build_rating(self):
@@ -1188,12 +1428,53 @@ class App(ctk.CTk):
         self.lib_folder = k
         self.refresh_library()
 
+    def group_library(self, items):
+        """The same series saved from several sources becomes one card; nothing is merged in db.json.
+
+        The copy that was read most recently leads (its progress and badge show on the card) and the
+        others hang off it as "_alts" for the right-click menu."""
+        if not S("group_dupes"):
+            return items
+        skip = set(DB["meta"].get("no_group") or [])
+        buckets: dict[str, list] = {}
+        for b in items:
+            n = norm_title(b["title"])
+            buckets.setdefault(n if n and pkey(b) not in skip else pkey(b), []).append(b)
+        out, done = [], set()
+        for b in items:
+            n = norm_title(b["title"])
+            k = n if n and pkey(b) not in skip else pkey(b)
+            if k in done:
+                continue
+            done.add(k)
+            g = buckets[k]
+            if len({x["source"] for x in g}) < 2:
+                out.extend(g)
+                continue
+            lead = max(g, key=lambda x: DB["progress"].get(pkey(x), {}).get("ts", 0))
+            out.append({**lead, "_alts": [x for x in g if x is not lead]})
+        return out
+
+    def ungroup(self, m):
+        keys = DB["meta"].setdefault("no_group", [])
+        keys.extend(k for k in (pkey(x) for x in [m, *(m.get("_alts") or [])]) if k not in keys)
+        save_db()
+        self.refresh_library()
+
     def lib_ctx(self, e, m):
         moves = [("None (Unsorted)", lambda: self.move_to(m, ""))] + [(f, lambda f=f: self.move_to(m, f)) for f in DB["folders"]]
         moves.append(("New folder…", lambda: self.new_folder(m)))
-        self.popup(e, [("Open", lambda: self.open_manga(m)), ("Rate / comment…", lambda: self.rate_manga(m)),
-                       ("Move to folder", moves), ("-", None),
-                       ("Remove from library", lambda: self.remove_bm(m))])
+        alts = m.get("_alts")
+        entries = [("Open", lambda: self.open_manga(m))]
+        if alts:
+            entries.append(("Open on…", [(getattr(SOURCES.get(x["source"]), "name", x["source"]),
+                                          lambda x=x: self.open_manga(x)) for x in [m, *alts]]))
+        entries += [("Rate / comment…", lambda: self.rate_manga(m)), ("Move to folder", moves), ("-", None)]
+        if alts:
+            entries.append(("Show each source separately", lambda: self.ungroup(m)))
+        entries.append(("Remove this source from library" if alts else "Remove from library",
+                        lambda: self.remove_bm(m)))
+        self.popup(e, entries)
 
     def card_ctx(self, e, m):
         """Right-click menu for manga cards in Sources."""
@@ -1742,18 +2023,18 @@ class App(ctk.CTk):
         self.set_mode.set(S("mode"))
         self.set_mode.pack(side="left")
         r = row(f)
+        ctk.CTkLabel(r, text="Auto-scroll speed", text_color=TEXT, width=190, anchor="w").pack(side="left")
+        self.set_auto = menu(r, list(AUTO_SPEEDS), self.set_auto_speed, width=220)
+        self.set_auto.set(self.auto_speed_name())
+        self.set_auto.pack(side="left")
+        ctk.CTkLabel(r, text="webtoon mode: A starts and stops it, , and . (or [ and ]) change the speed",
+                     text_color=MUTED, font=("Segoe UI", 11)).pack(side="left", padx=10)
+        r = row(f)
         ctk.CTkLabel(r, text="Background", text_color=TEXT, width=190, anchor="w").pack(side="left")
         self.set_paper = menu(r, PAPERS, self.apply_paper, width=200)
         self.set_paper.set(S("paper"))
         self.set_paper.pack(side="left")
-        ctk.CTkLabel(r, text="paper texture behind the pages and the menu", text_color=MUTED,
-                     font=("Segoe UI", 11)).pack(side="left", padx=10)
-        r = row(f)
-        ctk.CTkLabel(r, text="Reader background", text_color=TEXT, width=190, anchor="w").pack(side="left")
-        self.set_reader_paper = menu(r, PAPERS, self.apply_reader_paper, width=200)
-        self.set_reader_paper.set(S("reader_paper"))
-        self.set_reader_paper.pack(side="left")
-        ctk.CTkLabel(r, text="starts on Graphite matte; independent of the app theme", text_color=MUTED,
+        ctk.CTkLabel(r, text="the whole app, reader included", text_color=MUTED,
                      font=("Segoe UI", 11)).pack(side="left", padx=10)
         r = row(f)
         self.sw_guides = ctk.CTkSwitch(r, text="In paged modes: black page borders, page numbers and the double-page gutter",
@@ -1783,6 +2064,76 @@ class App(ctk.CTk):
         if S("start_fullscreen"):
             self.sw_fs.select()
         ctk.CTkFrame(f, height=8, fg_color="transparent").pack()
+
+        f = card("Library")
+        r = row(f)
+        self.sw_group = ctk.CTkSwitch(r, text="Show the same series from different sources as one card "
+                                              "(right-click it to pick the source)",
+                                      progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
+                                      command=lambda: self.setv("group_dupes", bool(self.sw_group.get())))
+        self.sw_group.pack(side="left")
+        if S("group_dupes"):
+            self.sw_group.select()
+        ctk.CTkFrame(f, height=8, fg_color="transparent").pack()
+
+        f = card("Notifications")
+        r = row(f)
+        self.sw_notify = ctk.CTkSwitch(r, text="Notify me when a favourite gets new chapters (only while the app "
+                                               "is open; checked every 30 minutes)",
+                                       progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
+                                       command=self.toggle_notify)
+        self.sw_notify.pack(side="left")
+        if S("notify_new"):
+            self.sw_notify.select()
+        r = row(f)
+        btn(r, "Check now", self.check_now, width=110).pack(side="left")
+        self.notify_lbl = ctk.CTkLabel(r, text="", text_color=MUTED, anchor="w")
+        self.notify_lbl.pack(side="left", padx=10)
+        if not HAVE_TRAY:
+            self.sw_notify.configure(state="disabled")
+            ctk.CTkLabel(f, text="Toasts need the optional pystray package (pip install pystray).",
+                         text_color=MUTED, font=("Segoe UI", 11), anchor="w").pack(fill="x", padx=16, pady=(0, 6))
+        ctk.CTkLabel(f, text="Off by default. Turning it on shows a tray icon while the app is open; closing the "
+                             "window always quits the app, nothing keeps running or starts with Windows.",
+                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
+                     justify="left").pack(fill="x", padx=16, pady=(0, 10))
+
+        f = card("Privacy")
+        r = row(f)
+        ctk.CTkLabel(r, text="Panic key", text_color=TEXT, width=190, anchor="w").pack(side="left")
+        self.set_panic = menu(r, PANIC_KEYS, lambda v: self.setv("panic_key", v), width=120)
+        self.set_panic.set(S("panic_key"))
+        self.set_panic.pack(side="left")
+        ctk.CTkLabel(r, text="hides the window at once (the Hide button in the top bar does the same)",
+                     text_color=MUTED, font=("Segoe UI", 11)).pack(side="left", padx=10)
+        r = row(f)
+        ctk.CTkLabel(r, text="PIN lock (optional)", text_color=TEXT, width=190, anchor="w").pack(side="left")
+        self.pin_lbl = ctk.CTkLabel(r, text="", text_color=MUTED, width=90, anchor="w")
+        self.pin_lbl.pack(side="left")
+        self.pin_set_btn = btn(r, "Set PIN…", self.set_pin, width=120)
+        self.pin_set_btn.pack(side="left", padx=(0, 8))
+        self.pin_rm_btn = btn(r, "Remove PIN", self.remove_pin, width=120)
+        self.pin_rm_btn.pack(side="left")
+        r = row(f)
+        self.sw_pin_start = ctk.CTkSwitch(r, text="Ask for the PIN when the app starts",
+                                          progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
+                                          command=lambda: self.setv("pin_on_start", bool(self.sw_pin_start.get())))
+        self.sw_pin_start.pack(side="left")
+        if S("pin_on_start"):
+            self.sw_pin_start.select()
+        r = row(f)
+        self.sw_pin_hide = ctk.CTkSwitch(r, text="Ask for the PIN again after the window was hidden "
+                                                 "(panic key, Hide button, tray)",
+                                         progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
+                                         command=lambda: self.setv("pin_on_hide", bool(self.sw_pin_hide.get())))
+        self.sw_pin_hide.pack(side="left")
+        if S("pin_on_hide"):
+            self.sw_pin_hide.select()
+        ctk.CTkLabel(f, text="The PIN only covers the app window; it does not encrypt your library or downloads. "
+                             "While the app is locked, toasts never show titles.",
+                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
+                     justify="left").pack(fill="x", padx=16, pady=(4, 12))
+        self.refresh_pin_ui()
 
         f = card("Updates")
         r = row(f)
@@ -1959,11 +2310,6 @@ class App(ctk.CTk):
         self.setv("paper", name)
         theme_pick(name)
         self.after(10, self.rebuild_ui)     # let the option-menu callback return before we destroy it
-
-    def apply_reader_paper(self, name):
-        self.setv("reader_paper", name)
-        if self.cur == "Reader":
-            self.build_body()
 
     def reload_sources(self):
         rebuild_sources()
@@ -2173,7 +2519,7 @@ class App(ctk.CTk):
             f"OS: {platform.platform()}",
             f"Python: {platform.python_version()}" + ("  (frozen exe)" if getattr(sys, "frozen", False) else ""),
             f"Window: {self.winfo_width()}x{self.winfo_height()}  borderless={self._borderless}",
-            f"Reading mode: {S('mode')}   Background: {S('paper')}   Reader background: {S('reader_paper')}",
+            f"Reading mode: {S('mode')}   Background: {S('paper')}",
             f"Sources loaded: {len(SOURCES)}   Visible in Sources: "
             f"{len([s for s in SOURCES.values() if (S('nsfw') or not s.nsfw) and not source_hidden(s.id)])}",
             f"Selected source: {src}",
@@ -2957,7 +3303,7 @@ class App(ctk.CTk):
         r, gen, n = self.reader, self.reader["gen"], len(self.reader["urls"])
         W = self.web_width()
         dims = self.wt_dims(r["urls"], W)
-        c = tk.Canvas(self.rbody, bg=(paper_avg(S("reader_paper")) or READER_BG), highlightthickness=0,
+        c = tk.Canvas(self.rbody, bg=(paper_avg(S("paper")) or READER_BG), highlightthickness=0,
                       yscrollincrement=1, xscrollincrement=1)
         vs = ctk.CTkScrollbar(self.rbody, command=c.yview, fg_color=READER_BG, button_color=BTN_HI, button_hover_color=SILVER_DIM)
         hs = ctk.CTkScrollbar(self.rbody, orientation="horizontal", command=c.xview, fg_color=READER_BG, button_color=BTN_HI,
@@ -3038,7 +3384,7 @@ class App(ctk.CTk):
 
     def wt_make_tex(self, r, c, cw, ch):
         """(Re)build the pool of paper tiles that sit behind the pages, sized to the viewport."""
-        tex = paper_tile(self, S("reader_paper"))
+        tex = paper_tile(self, S("paper"))
         tiles = []
         if tex:
             ts = tex.width()
@@ -3411,7 +3757,7 @@ class App(ctk.CTk):
     # --- paged (single / double, LTR / RTL) ---
     def build_paged(self):
         r = self.reader
-        c = tk.Canvas(self.rbody, bg=(paper_avg(S("reader_paper")) or READER_BG), highlightthickness=0)
+        c = tk.Canvas(self.rbody, bg=(paper_avg(S("paper")) or READER_BG), highlightthickness=0)
         c.pack(fill="both", expand=True)
         r.update(c=c, imgs={}, req=set(), failed=set(), pan=[0, 0], ph=None, rkey=None, drag=None)
         r["restore"] = None
@@ -3483,7 +3829,7 @@ class App(ctk.CTk):
         self.r_page.configure(text=f"{sp[0] + 1}{'–' + str(sp[-1] + 1) if len(sp) > 1 else ''} / {n}")
         ims = [r["imgs"].get(i) for i in sp]
         c.delete("all")
-        tile = paper_tile(self, S("reader_paper"))  # paper surface behind the pages
+        tile = paper_tile(self, S("paper"))  # paper surface behind the pages
         if tile:
             ts = tile.width()
             for y in range(0, int(ch) + ts, ts):
@@ -3667,6 +4013,46 @@ class App(ctk.CTk):
             return 0.0
         return new - top
 
+    def auto_speed_name(self):
+        v = S("autoscroll")
+        return v if v in AUTO_SPEEDS else "Medium"
+
+    def auto_scroll_toggle(self):
+        """Hotkey A: scroll the webtoon strip at the chosen preset speed until stopped."""
+        r = self.reader
+        if self._mmb and self._mmb.get("fixed"):
+            self.mmb_stop()
+            self.auto_hint("Auto-scroll off")
+            return
+        self.mmb_stop()
+        if not self.is_web():
+            self.auto_hint("Auto-scroll needs the Webtoon (vertical) mode")
+            return
+        c = r["c"]
+        m = self._canvas_metrics(c)
+        if m is None or m[1] <= m[2] + 1:
+            return
+        name = self.auto_speed_name()
+        self._mmb = {"c": c, "v": AUTO_SPEEDS[name], "fixed": True, "last": time.perf_counter()}
+        self._mmb_job = self.after(MMB_TICK, self.mmb_tick)
+        self.auto_hint(f"Auto-scroll: {name}   ( , slower   . faster )")
+
+    def auto_speed_step(self, d):
+        names = list(AUTO_SPEEDS)
+        new = names[max(0, min(len(names) - 1, names.index(self.auto_speed_name()) + d))]
+        self.set_auto_speed(new)
+        try:
+            self.set_auto.set(new)
+        except Exception:
+            pass
+        self.auto_hint(f"Auto-scroll: {new}")
+
+    def set_auto_speed(self, name):
+        DB["set"]["autoscroll"] = name
+        save_db_soon()
+        if self._mmb and self._mmb.get("fixed"):
+            self._mmb["v"] = AUTO_SPEEDS[name]
+
     def mmb_press(self, e):
         """Middle click toggles auto-scroll: no dragging, click again to stop.
 
@@ -3674,6 +4060,8 @@ class App(ctk.CTk):
         in the lower half starts a slow downward scroll immediately. Moving further down (or
         up) speeds it up; moving back towards the middle slows it down again.
         """
+        if self._locked:
+            return
         if self._mmb:
             self.mmb_stop()
             return "break"
@@ -3705,6 +4093,22 @@ class App(ctk.CTk):
         dt = min(0.08, max(0.001, now - st["last"]))
         st["last"] = now
         c = st["c"]
+        if st.get("fixed"):        # hotkey auto-scroll: constant preset speed, no pointer involved
+            try:
+                alive = c.winfo_exists()
+            except Exception:
+                alive = False
+            if not alive:
+                self.mmb_stop()
+                return
+            moved = self._scroll_px(c, st["v"] * dt)
+            st["stuck"] = 0 if moved else st.get("stuck", 0) + 1
+            if st["stuck"] > 75:   # ~1.2 s with nothing left to scroll: the end of the chapter
+                self.mmb_stop()
+                self.auto_hint("Auto-scroll stopped: end of the chapter")
+                return
+            self._mmb_job = self.after(MMB_TICK, self.mmb_tick)
+            return
         try:
             if not c.winfo_exists():
                 self.mmb_stop()
@@ -3749,6 +4153,8 @@ class App(ctk.CTk):
                 pass
 
     def on_wheel(self, e):
+        if self._locked:
+            return
         if self._mmb:
             self.mmb_stop()
         if self._listbox_open():
@@ -3770,18 +4176,30 @@ class App(ctk.CTk):
             self.pg_step(1 if e.delta < 0 else -1)
 
     def on_key(self, e):
+        k = e.keysym
+        if k == S("panic_key"):
+            self.hide_window()
+            return
+        if self._locked:
+            return
         if self._listbox_open():
-            if e.keysym == "Escape":
+            if k == "Escape":
                 self._chs_open.destroy()
+            return
+        r = self.reader
+        live = self.cur == "Reader" and bool(r) and "c" in r
+        if live and k in ("a", "A"):
+            self.auto_scroll_toggle()
+            return
+        if live and (k in AUTO_SLOWER or k in AUTO_FASTER):
+            self.auto_speed_step(1 if k in AUTO_FASTER else -1)
             return
         if self._mmb:
             self.mmb_stop()          # any keyboard input takes back manual control
-            if e.keysym == "Escape":
+            if k == "Escape":
                 return
-        r = self.reader
-        if self.cur != "Reader" or not r or "c" not in r:
+        if not live:
             return
-        k = e.keysym
         if k in ("plus", "equal", "KP_Add"):
             self.zoom_by(1)
         elif k in ("minus", "KP_Subtract"):
@@ -3805,4 +4223,9 @@ class App(ctk.CTk):
 
 if __name__ == "__main__":
     threading.Thread(target=prune_cache, daemon=True).start()   # cache trim never blocks the UI
-    App().mainloop()
+    app = App()
+    try:
+        app.mainloop()
+    finally:
+        if app._tray:
+            app._tray.stop()

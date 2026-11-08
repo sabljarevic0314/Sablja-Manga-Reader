@@ -4,8 +4,8 @@ from typing import Any, cast
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat, ImageTk
 
-PAPER_RGB = {"Graphite matte": (41, 42, 46), "Ink matte": (23, 24, 27), "Paper": (226, 219, 200)}
-PAPER_KIND = {"Graphite matte": "matte", "Ink matte": "matte", "Paper": "matte"}
+PAPER_RGB = {"Black": (23, 24, 27), "White": (228, 230, 234)}
+PAPER_KIND = {"Black": "matte", "White": "matte"}
 
 
 # ---------------- paper / book-cloth textures ----------------
