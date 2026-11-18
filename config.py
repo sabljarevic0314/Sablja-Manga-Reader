@@ -49,7 +49,7 @@ DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
             "show_history": True, "start_fullscreen": True, "card_genres": True,
             "update_auto": True}
 
-APP_VERSION = "1.4.5"
+APP_VERSION = "1.4.6"
 
 if BASE != _EXE_DIR:
     _bundled, _mark = os.path.join(_EXE_DIR, "sources.json"), os.path.join(BASE, ".sources_version")

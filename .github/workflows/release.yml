@@ -69,7 +69,7 @@ jobs:
           cp dist/SabljaReader dist/sources.json dist/SabljaReader.png dist/install-linux.sh pkg/SabljaReader/
           tar -C pkg -czf dist/SabljaReader-linux-x86_64.tar.gz SabljaReader
 
-      - name: Build the AppImage (one file: download, make executable, double-click)
+      - name: Build the AppImage
         run: |
           mkdir -p AppDir/usr/bin
           cp dist/SabljaReader dist/sources.json AppDir/usr/bin/
