@@ -40,7 +40,7 @@ DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
             "show_history": True, "start_fullscreen": True, "card_genres": True,
             "update_auto": True}
 
-APP_VERSION = "1.4.3"
+APP_VERSION = "1.4.4"
 REPO_URL = "https://github.com/sabljarevic0314/Sablja-Manga-Reader"
 GITHUB_API = "https://api.github.com/repos/sabljarevic0314/Sablja-Manga-Reader/releases/latest"
 UPDATE_ASSET = "SabljaReader-Setup.exe"

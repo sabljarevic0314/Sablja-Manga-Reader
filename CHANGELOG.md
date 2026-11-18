@@ -3,7 +3,7 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
-## Unreleased
+## 1.4.4 — 2026-11-18
 
 ### Added
 
@@ -22,6 +22,9 @@ All notable changes to Sablja Reader are listed here. The app version is shown i
   on Windows.
 - Dialogs no longer fail with "grab failed: window not viewable", and the chapter picker's number
   box gets keyboard focus.
+- Right-clicking a cover or source no longer jumps straight into the series: on X11 the menu opened under
+  the cursor and the button release picked "Open". Menus now open just off the cursor.
+- The sidebar paints its error to `data/errors.log` instead of staying silently empty.
 
 ## 1.4.3 — 2026-11-08
 
