@@ -3,6 +3,14 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## 1.4.5 — 2026-11-18
+
+### Added
+
+- **Linux AppImage.** Releases now include `SabljaReader-x86_64.AppImage`: download it, tick *Is executable*
+  once (Properties > Permissions), and double-click. No terminal and no install step. Its library, settings
+  and `sources.json` live in `~/.local/share/SabljaReader`, the same folder `install-linux.sh` uses.
+
 ## 1.4.4 — 2026-11-18
 
 ### Added

@@ -3,7 +3,16 @@
 import os
 import sys
 
-BASE = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
+import shutil
+
+_EXE_DIR = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
+if os.environ.get("APPIMAGE"):
+    # An AppImage runs from a read-only mount, so data/ and sources.json live in the same per-user folder
+    # install-linux.sh uses. sources.json is refreshed from the bundled copy when the app version changes
+    # (the previous one is kept as sources.json.bak).
+    BASE = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "SabljaReader")
+else:
+    BASE = _EXE_DIR
 DATA = os.path.join(BASE, "data")
 CACHE = os.path.join(DATA, "cache")
 DB_FILE = os.path.join(DATA, "db.json")
@@ -40,7 +49,19 @@ DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
             "show_history": True, "start_fullscreen": True, "card_genres": True,
             "update_auto": True}
 
-APP_VERSION = "1.4.4"
+APP_VERSION = "1.4.5"
+
+if BASE != _EXE_DIR:
+    _bundled, _mark = os.path.join(_EXE_DIR, "sources.json"), os.path.join(BASE, ".sources_version")
+    try:
+        _seen = open(_mark, encoding="utf-8").read().strip() if os.path.exists(_mark) else ""
+        if os.path.exists(_bundled) and (_seen != APP_VERSION or not os.path.exists(SRC_FILE)):
+            if os.path.exists(SRC_FILE):
+                shutil.copyfile(SRC_FILE, SRC_FILE + ".bak")
+            shutil.copyfile(_bundled, SRC_FILE)
+            open(_mark, "w", encoding="utf-8").write(APP_VERSION)
+    except OSError:
+        pass
 REPO_URL = "https://github.com/sabljarevic0314/Sablja-Manga-Reader"
 GITHUB_API = "https://api.github.com/repos/sabljarevic0314/Sablja-Manga-Reader/releases/latest"
 UPDATE_ASSET = "SabljaReader-Setup.exe"

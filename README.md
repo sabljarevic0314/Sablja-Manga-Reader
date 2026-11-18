@@ -79,6 +79,10 @@ between them if you want both copies to share the same library.
 
 Sablja Reader runs on Linux too (X11 or Wayland via XWayland). Two ways to get it:
 
+**AppImage (easiest).** Download `SabljaReader-x86_64.AppImage` from the newest [Release](../../releases),
+right-click it > **Properties** > **Permissions** > tick **Is executable**, then double-click. Nothing is
+installed; your library is kept in `~/.local/share/SabljaReader`.
+
 **Release build.** Download `SabljaReader-linux-x86_64.tar.gz` from the newest
 [Release](../../releases), unpack it, and run `./install-linux.sh` inside the folder. It installs
 per-user into `~/.local/share/SabljaReader` (no root) and adds **Sablja Reader** to your app menu.
