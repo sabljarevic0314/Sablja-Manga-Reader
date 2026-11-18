@@ -1,6 +1,6 @@
 # Sablja Reader — notes for Claude
 
-Windows/Linux desktop manga/webtoon reader written in Python (customtkinter + Tk). Current version: **1.4.5**
+Windows/Linux desktop manga/webtoon reader written in Python (customtkinter + Tk). Current version: **1.4.6**
 (`config.py`, `APP_VERSION`). Repo: `sabljarevic0314/Sablja-Manga-Reader`.
 
 **Read `AGENTS.md` before touching any source.** It holds the non-negotiable rules for sources
