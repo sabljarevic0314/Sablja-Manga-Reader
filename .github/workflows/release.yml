@@ -69,7 +69,21 @@ jobs:
           cp dist/SabljaReader dist/sources.json dist/SabljaReader.png dist/install-linux.sh pkg/SabljaReader/
           tar -C pkg -czf dist/SabljaReader-linux-x86_64.tar.gz SabljaReader
 
+      - name: Build the AppImage (one file: download, make executable, double-click)
+        run: |
+          mkdir -p AppDir/usr/bin
+          cp dist/SabljaReader dist/sources.json AppDir/usr/bin/
+          cp dist/SabljaReader.png AppDir/SabljaReader.png
+          printf '#!/bin/sh\nexec "$(dirname "$(readlink -f "$0")")/usr/bin/SabljaReader" "$@"\n' > AppDir/AppRun
+          chmod +x AppDir/AppRun
+          printf '[Desktop Entry]\nType=Application\nName=Sablja Reader\nComment=Manga, manhwa and webtoon reader\nExec=SabljaReader\nIcon=SabljaReader\nTerminal=false\nCategories=Graphics;Viewer;\nStartupWMClass=SabljaReader\n' > AppDir/SabljaReader.desktop
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir dist/SabljaReader-x86_64.AppImage
+
       - name: Publish the GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/SabljaReader-linux-x86_64.tar.gz
+          files: |
+            dist/SabljaReader-linux-x86_64.tar.gz
+            dist/SabljaReader-x86_64.AppImage
