@@ -1,6 +1,6 @@
 # Sablja Reader
 
-A desktop manga / manhwa / webtoon reader for Windows. Black UI with a
+A desktop manga / manhwa / webtoon reader for Windows and Linux. Black UI with a
 *White* look in **Settings → Background**, webtoon (vertical strip),
 single, double and right-to-left paged reading, a library with folders and bookmarks, downloads,
 a History section and progress tracking — plus a built-in random manga roll (Randomizer).
@@ -72,6 +72,40 @@ HTML parser and silently falls back to Python's built-in `html.parser` if it is 
 A source checkout keeps its **own** `data\` folder next to `SabljaReader.py`. That folder is
 separate from an installed copy's `%LOCALAPPDATA%\Programs\SabljaReader\data`, so copy `db.json`
 between them if you want both copies to share the same library.
+
+---
+
+## Linux
+
+Sablja Reader runs on Linux too (X11 or Wayland via XWayland). Two ways to get it:
+
+**Release build.** Download `SabljaReader-linux-x86_64.tar.gz` from the newest
+[Release](../../releases), unpack it, and run `./install-linux.sh` inside the folder. It installs
+per-user into `~/.local/share/SabljaReader` (no root) and adds **Sablja Reader** to your app menu.
+Your library lives in `~/.local/share/SabljaReader/data` and, like on Windows, survives updates
+and `./install-linux.sh --uninstall`. To update, unpack the new release and run the script again.
+
+**From source.** You need Python 3.13+ with Tk, which most distros ship as a separate package:
+
+```bash
+sudo dnf install python3-tkinter      # Fedora
+sudo apt install python3-tk python3-venv   # Debian / Ubuntu
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python SabljaReader.py
+```
+
+To build your own binary instead, run `pip install pyinstaller` and then `./build.sh`. That writes
+`dist/SabljaReader`; then run `dist/install-linux.sh`.
+
+What's different from Windows:
+
+* **Updates** only open the release page. There is no auto-installer on Linux.
+* **Fullscreen** (F11) uses the window manager's fullscreen. The app's own window bar stays visible.
+* **Notifications / tray icon** need a tray. On GNOME that means the *AppIndicator* extension. Without
+  one the app still runs, just with no tray icon or toasts.
+* The UI font is Noto Sans. If it's missing, your system's default sans font is used.
 
 ---
 
