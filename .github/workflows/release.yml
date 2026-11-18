@@ -41,3 +41,35 @@ jobs:
         with:
           files: dist/SabljaReader-Setup.exe
           generate_release_notes: true
+
+  linux:
+    runs-on: ubuntu-22.04      # older glibc, so the binary runs on more distros
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build the app
+        run: ./build.sh
+
+      - name: Package
+        run: |
+          mkdir -p pkg/SabljaReader
+          cp dist/SabljaReader dist/sources.json dist/SabljaReader.png dist/install-linux.sh pkg/SabljaReader/
+          tar -C pkg -czf dist/SabljaReader-linux-x86_64.tar.gz SabljaReader
+
+      - name: Publish the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SabljaReader-linux-x86_64.tar.gz

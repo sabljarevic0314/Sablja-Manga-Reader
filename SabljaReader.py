@@ -1,5 +1,14 @@
 import os, sys, re, time, hashlib, threading, queue, shutil, zipfile, random, io, math, platform, webbrowser, traceback, tempfile, subprocess
 from typing import Any, cast
+
+if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+    # The PyInstaller binary points LD_LIBRARY_PATH at its bundled libs, which breaks xdg-open and
+    # browsers we start. The loader only read it at startup, so restoring it here is safe for us.
+    _ld = os.environ.pop("LD_LIBRARY_PATH_ORIG", None)
+    if _ld is not None:
+        os.environ["LD_LIBRARY_PATH"] = _ld
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
 from urllib.parse import urlencode
 import requests
 from PIL import Image, ImageTk
@@ -47,7 +56,13 @@ BG, SIDE, PANEL, CARD, CARD_HI = "#1d1e22", "#1c1d21", "#24252a", "#2b2d33", "#3
 BTN, BTN_HI, LINE = "#2d2f35", "#3c3f47", "#35383f"
 SILVER, SILVER_HI, SILVER_DIM, INK = "#c5cad3", "#e8ebf0", "#7d838e", "#14151a"
 TEXT, MUTED, READER_BG = "#e7e9ed", "#8a8f99", "#1a1b1f"
-FONT = ("Segoe UI", 12)
+# Segoe UI ships with Windows only; elsewhere fontconfig falls back to the nearest sans if Noto is missing.
+WIN = sys.platform == "win32"
+UI_FONT = "Segoe UI" if WIN else "Noto Sans"
+# Tk 8.6 on X11 sends the wheel as Button-4/5; Tk 9 sends MouseWheel with a delta like Windows does.
+X11 = not WIN and sys.platform != "darwin"
+OLD_X11_WHEEL = X11 and tk.TkVersion < 9
+FONT = (UI_FONT, 12)
 
 
 
@@ -210,6 +225,42 @@ def download_release_asset(info):
     return dest
 
 
+# ---------------- platform helpers ----------------
+def open_path(p):
+    """Open a file or folder with the desktop's default app (Explorer, Finder, xdg-open)."""
+    if WIN:
+        os.startfile(p)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", p])
+    else:
+        subprocess.Popen(["xdg-open", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def wheel_event(e, delta):
+    """X11 Tk 8.6 reports the wheel as Button-4/5 with no delta; give it the Windows-sized one."""
+    e.delta = delta
+    return e
+
+
+def bind_wheel(widget, fn, all_=False):
+    """Bind fn to the mouse wheel on every platform (MouseWheel, plus Button-4/5 on X11)."""
+    bind = widget.bind_all if all_ else widget.bind
+    bind("<MouseWheel>", fn, add="+")
+    if OLD_X11_WHEEL:
+        bind("<Button-4>", lambda e: fn(wheel_event(e, 120)), add="+")
+        bind("<Button-5>", lambda e: fn(wheel_event(e, -120)), add="+")
+
+
+def grab_when_mapped(win, tries=20):
+    """grab_set, retried briefly: X11 refuses a grab until the window is actually on screen."""
+    try:
+        if win.winfo_exists():
+            win.grab_set()
+    except tk.TclError:
+        if tries > 0:
+            win.after(50, lambda: grab_when_mapped(win, tries - 1))
+
+
 # ---------------- ui helpers ----------------
 def clear(f):
     for w in f.winfo_children():
@@ -272,9 +323,9 @@ def style_ttk():
     except Exception:
         pass
     st.configure("S.Treeview", background=CARD, fieldbackground=CARD, foreground=TEXT, rowheight=34, borderwidth=0,
-                 font=("Segoe UI", 11), relief="flat")
+                 font=(UI_FONT, 11), relief="flat")
     st.map("S.Treeview", background=[("selected", CARD_HI)], foreground=[("selected", SILVER_HI)])
-    st.configure("S.Treeview.Heading", background=PANEL, foreground=MUTED, relief="flat", font=("Segoe UI", 10, "bold"))
+    st.configure("S.Treeview.Heading", background=PANEL, foreground=MUTED, relief="flat", font=(UI_FONT, 10, "bold"))
     st.layout("S.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
 
 
@@ -309,7 +360,7 @@ def random_pick(avoid):
 
 class App(ctk.CTk):
     def __init__(self):
-        super().__init__()
+        super().__init__(className="SabljaReader")   # WM_CLASS, so Linux docks match the .desktop entry
         ctk.set_appearance_mode("dark")
         theme_pick(S("paper"))          # the saved background decides the chrome palette
         self.title("Sablja Reader")
@@ -322,11 +373,14 @@ class App(ctk.CTk):
             self.after(60, self.start_fullscreen)
         ico = os.path.join(DATA, "sablja3.ico")   # new name so the new logo replaces an old cached icon
         try:
+            if not WIN:
+                raise OSError("iconbitmap only takes .ico files on Windows")
             make_icon_file(ico)
             self.after(300, lambda: self.iconbitmap(ico))  # CTk sets its own icon at ~200ms, so set ours after
         except Exception:
             try:
-                self.iconphoto(True, cast(tk.PhotoImage, ImageTk.PhotoImage(make_icon(64))))
+                self._icon_img = ImageTk.PhotoImage(make_icon(64))   # keep a reference or Tk drops it
+                self.iconphoto(True, cast(tk.PhotoImage, self._icon_img))
             except Exception:
                 pass
         style_ttk()
@@ -354,7 +408,7 @@ class App(ctk.CTk):
         self._pin_fails, self._pin_block, self._hint, self._hint_job = 0, 0.0, None, None
         self.nav_build()
         rebuild_sources()
-        self.bind_all("<MouseWheel>", self.on_wheel, add="+")
+        bind_wheel(self, self.on_wheel, all_=True)
         self.bind_all("<Button-2>", self.mmb_press, add="+")
         self.bind_all("<Button-1>", self.mmb_click_stop, add="+")
         self.bind_all("<Button-3>", self.mmb_click_stop, add="+")
@@ -389,6 +443,23 @@ class App(ctk.CTk):
         if on == self._borderless:
             self._fs = on
             self.sync_window_controls()
+            return
+        if not WIN:
+            # X11/Wayland window managers don't give an overrideredirect window keyboard focus,
+            # so use the WM's real fullscreen there; the app's own window bar still shows.
+            try:
+                if on and save_geom:
+                    self._win_geom = self.geometry()
+                self._fs = self._borderless = on
+                self.attributes("-fullscreen", on)
+                if not on:
+                    self.geometry(self._win_geom or "1280x800")
+                self.sync_window_controls()
+                self.after(40, self.paint_side)
+                if on:
+                    self.after(20, self.focus_force)
+            except Exception:
+                pass
             return
         try:
             if on:
@@ -481,20 +552,20 @@ class App(ctk.CTk):
         self.winbar.pack_propagate(False)
         self.win_close = ctk.CTkButton(self.winbar, text="\u2715", command=self.close, width=30, height=24,
                                        corner_radius=6, fg_color="transparent", hover_color="#a83a3a",
-                                       text_color=MUTED, font=("Segoe UI", 11, "bold"))
+                                       text_color=MUTED, font=(UI_FONT, 11, "bold"))
         self.win_close.pack(side="right", padx=(4, 10), pady=4)
         self.win_fs = ctk.CTkButton(self.winbar, text="\u2750" if self._fs else "\u25a1",
                                     command=self.toggle_fullscreen, width=30, height=24, corner_radius=6,
                                     fg_color="transparent", hover_color=BTN_HI, text_color=MUTED,
-                                    font=("Segoe UI", 11, "bold"))
+                                    font=(UI_FONT, 11, "bold"))
         self.win_fs.pack(side="right", padx=4, pady=4)
         self.win_min = ctk.CTkButton(self.winbar, text="\u2014", command=self.minimize_window, width=30, height=24,
                                      corner_radius=6, fg_color="transparent", hover_color=BTN_HI,
-                                     text_color=MUTED, font=("Segoe UI", 11, "bold"))
+                                     text_color=MUTED, font=(UI_FONT, 11, "bold"))
         self.win_min.pack(side="right", padx=4, pady=4)
         self.win_hide = ctk.CTkButton(self.winbar, text="Hide", command=self.hide_window, width=44, height=24,
                                       corner_radius=6, fg_color="transparent", hover_color=BTN_HI,
-                                      text_color=MUTED, font=("Segoe UI", 11))
+                                      text_color=MUTED, font=(UI_FONT, 11))
         self.win_hide.pack(side="right", padx=4, pady=4)
 
         self.views = {n: ctk.CTkFrame(self.main, fg_color="transparent", corner_radius=0)
@@ -635,12 +706,12 @@ class App(ctk.CTk):
         box = ctk.CTkFrame(f, fg_color="transparent")
         box.place(relx=0.5, rely=0.46, anchor="center")
         ctk.CTkLabel(box, text="", image=ctk.CTkImage(make_icon(128), size=(84, 84))).pack(pady=(0, 10))
-        ctk.CTkLabel(box, text="Sablja Reader is locked", font=("Segoe UI", 18, "bold"),
+        ctk.CTkLabel(box, text="Sablja Reader is locked", font=(UI_FONT, 18, "bold"),
                      text_color=SILVER_HI).pack(pady=(0, 14))
         self._pin_entry = entry(box, show="\u2022", width=220, placeholder_text="PIN", justify="center")
         self._pin_entry.pack(pady=4)
         self._pin_entry.bind("<Return>", self.try_unlock)
-        self._pin_msg = ctk.CTkLabel(box, text="", text_color=MUTED, font=("Segoe UI", 11))
+        self._pin_msg = ctk.CTkLabel(box, text="", text_color=MUTED, font=(UI_FONT, 11))
         self._pin_msg.pack(pady=2)
         btn(box, "Unlock", self.try_unlock, primary=True, width=220).pack(pady=(4, 6))
         btn(box, "Close app", self.quit_app, width=220, fg_color="transparent", text_color=SILVER_DIM,
@@ -724,7 +795,7 @@ class App(ctk.CTk):
             lab = self._hint
             if lab is None or not lab.winfo_exists():
                 lab = self._hint = ctk.CTkLabel(self.rbody, text="", corner_radius=14, fg_color=SILVER,
-                                                text_color=INK, font=("Segoe UI", 12, "bold"), height=28)
+                                                text_color=INK, font=(UI_FONT, 12, "bold"), height=28)
             lab.configure(text="   " + text + "   ")
             lab.place(relx=0.5, y=14, anchor="n")
             lab.lift()
@@ -772,6 +843,12 @@ class App(ctk.CTk):
 
     def paint_side(self):
         self._side_job = None
+        try:
+            self._paint_side()
+        except Exception as ex:             # never leave the menu silently empty: log why
+            log_error("sidebar paint", ex)
+
+    def _paint_side(self):
         c = self.side
         try:
             w, h = c.winfo_width() or 210, max(c.winfo_height() or 800, 320)
@@ -795,17 +872,17 @@ class App(ctk.CTk):
         except Exception:
             pass
         c.create_text(68, 47, anchor="w", text="Sablja\nReader", fill=SILVER_HI, justify="left",
-                      font=("Segoe UI", 15, "bold"))
+                      font=(UI_FONT, 15, "bold"))
         self._nav_items = {}
         for i, n in enumerate(self.nav_order):
             y = 122 + i * 44
             tag = f"nav:{n}"
             rect = c.create_rectangle(12, y, w - 12, y + 38, fill="", outline="", tags=(tag,))
-            txt = c.create_text(28, y + 19, anchor="w", text=n, fill=MUTED, font=("Segoe UI", 13), tags=(tag,))
+            txt = c.create_text(28, y + 19, anchor="w", text=n, fill=MUTED, font=(UI_FONT, 13), tags=(tag,))
             self._nav_items[n] = (rect, txt)
             if n == "Library" and self._fresh:      # series with chapters you have not read
                 c.create_text(w - 26, y + 19, anchor="e", text=str(len(self._fresh)), fill=SILVER_HI,
-                              font=("Segoe UI", 11, "bold"), tags=(tag,))
+                              font=(UI_FONT, 11, "bold"), tags=(tag,))
             self.nav[n] = True
             c.tag_bind(tag, "<Button-1>", lambda e, n=n: self.nav_click(n))
             c.tag_bind(tag, "<Enter>", lambda e, n=n: self.nav_hover(n, True))
@@ -829,7 +906,7 @@ class App(ctk.CTk):
             self.side.itemconfigure(txt, fill=SILVER_HI if on else (TEXT if hov else MUTED))
 
     def title_label(self, parent, text):
-        return ctk.CTkLabel(parent, text=text, font=("Segoe UI", 26, "bold"), text_color=SILVER_HI, anchor="w")
+        return ctk.CTkLabel(parent, text=text, font=(UI_FONT, 26, "bold"), text_color=SILVER_HI, anchor="w")
 
     def cols_for(self, extra=0, card=None, host=None, pad=12):
         """How many cards fit. Card sizes are logical px, widget widths are physical px,
@@ -959,14 +1036,14 @@ class App(ctk.CTk):
         img.pack(padx=6, pady=(6, 2))
         if badge and badge > 0:
             ctk.CTkLabel(card, text=f"\U0001f195{badge}", corner_radius=9, fg_color=BTN_HI, text_color=SILVER_HI,
-                         font=("Segoe UI", 10, "bold"), width=26, height=18, bg_color=PANEL
+                         font=(UI_FONT, 10, "bold"), width=26, height=18, bg_color=PANEL
                          ).place(relx=1.0, rely=0.0, x=-10, y=8, anchor="ne")
         if m.get("_alts"):
             ctk.CTkLabel(card, text=f"{len(m['_alts']) + 1} sources", corner_radius=9, fg_color=BTN_HI,
-                         text_color=SILVER_HI, font=("Segoe UI", 10, "bold"), width=64, height=18,
+                         text_color=SILVER_HI, font=(UI_FONT, 10, "bold"), width=64, height=18,
                          bg_color=PANEL).place(relx=0.0, rely=0.0, x=10, y=8, anchor="nw")
         t = m["title"] if len(m["title"]) < 46 else m["title"][:43] + "…"
-        ttl = ctk.CTkLabel(card, text=t, wraplength=iw - 6, height=34 if small else 44, font=("Segoe UI", 11 if small else 12), text_color=TEXT)
+        ttl = ctk.CTkLabel(card, text=t, wraplength=iw - 6, height=34 if small else 44, font=(UI_FONT, 11 if small else 12), text_color=TEXT)
         show_genres = S("card_genres")
         genres = (m.get("genres") or cached_genres(m)) if show_genres else []
         reserve = show_genres and bool(genres)
@@ -974,7 +1051,7 @@ class App(ctk.CTk):
         clickable = [card, img, ttl]
         if reserve:
             gl = ctk.CTkLabel(card, text=genre_text(genres, 1 if small else 2), wraplength=iw - 8,
-                              height=16 if small else 28, font=("Segoe UI", 8 if small else 9),
+                              height=16 if small else 28, font=(UI_FONT, 8 if small else 9),
                               text_color=SILVER_DIM, justify="center")
             gl.pack(padx=6, pady=(0, 5))
             clickable.append(gl)
@@ -996,7 +1073,7 @@ class App(ctk.CTk):
         self.cont_btn = btn(top, "", self.continue_reading, primary=True, height=38)
         self.cont_btn.pack(side="right")
         ctk.CTkLabel(v, text="Tip: right-click a cover for folders, bookmarks and more.", anchor="w",
-                     text_color=SILVER_DIM, font=("Segoe UI", 11)).pack(fill="x", padx=30, pady=(0, 4))
+                     text_color=SILVER_DIM, font=(UI_FONT, 11)).pack(fill="x", padx=30, pady=(0, 4))
         self.chip_row = ctk.CTkFrame(v, fg_color="transparent")
         self.chip_row.pack(fill="x", padx=28, pady=(0, 8))
         self.lib_scroll = ctk.CTkScrollableFrame(v, fg_color="transparent")
@@ -1016,7 +1093,10 @@ class App(ctk.CTk):
             else:
                 mn.add_command(label=lab, command=fn)
         try:
-            mn.tk_popup(e.x_root, e.y_root)
+            # X11 fires the item under the cursor when the right button is released, so start the menu
+            # just off the cursor there (otherwise the first entry, "Open", is chosen immediately)
+            off = 0 if WIN else 8
+            mn.tk_popup(e.x_root + off, e.y_root + off)
         finally:
             mn.grab_release()
 
@@ -1061,7 +1141,7 @@ class App(ctk.CTk):
                    if self.lib_folder == DL_VIEW_CHIP else
                    "Nothing here yet.\nOpen a manga from Sources and press Bookmark.\n"
                    "Right-click a cover to move it into a folder.")
-            ctk.CTkLabel(self.lib_scroll, text=msg, font=("Segoe UI", 14), text_color=MUTED).pack(pady=90)
+            ctk.CTkLabel(self.lib_scroll, text=msg, font=(UI_FONT, 14), text_color=MUTED).pack(pady=90)
         else:
             self.lib_cols = self.cols_for(host=self.lib_scroll)
             self.grid_cards(self.lib_scroll, shown, self.lib_cols, self.open_manga,
@@ -1078,7 +1158,7 @@ class App(ctk.CTk):
         btn(top, "Clear history", self.clear_history, width=120).pack(side="right")
         ctk.CTkLabel(v, text="Everything you have read, newest first — click a card to jump straight back in, "
                              "right-click to remove one. Hide this section in Settings.",
-                     anchor="w", text_color=SILVER_DIM, font=("Segoe UI", 11)).pack(fill="x", padx=30, pady=(0, 6))
+                     anchor="w", text_color=SILVER_DIM, font=(UI_FONT, 11)).pack(fill="x", padx=30, pady=(0, 6))
         self.hist_scroll = ctk.CTkScrollableFrame(v, fg_color="transparent")
         self.hist_scroll.pack(fill="both", expand=True, padx=18, pady=(0, 12))
 
@@ -1111,7 +1191,7 @@ class App(ctk.CTk):
         rows = self.hist_entries()
         if not rows:
             ctk.CTkLabel(self.hist_scroll, text="Nothing read yet.\nOpen a chapter and it shows up here.",
-                         font=("Segoe UI", 14), text_color=MUTED, justify="left").pack(pady=90)
+                         font=(UI_FONT, 14), text_color=MUTED, justify="left").pack(pady=90)
             return
         cols = self.cols_for(card=264, host=self.hist_scroll, pad=24)
         for i, (ts, key, m, p) in enumerate(rows):
@@ -1126,12 +1206,12 @@ class App(ctk.CTk):
         cov.pack(side="left", padx=(8, 10), pady=7)
         right = ctk.CTkFrame(card, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True, padx=(0, 10), pady=8)
-        ctk.CTkLabel(right, text=m.get("title", "?"), font=("Segoe UI", 12, "bold"), text_color=TEXT,
+        ctk.CTkLabel(right, text=m.get("title", "?"), font=(UI_FONT, 12, "bold"), text_color=TEXT,
                      wraplength=142, justify="left", anchor="w").pack(fill="x")
-        ctk.CTkLabel(right, text=(p.get("title") or "Chapter")[:28], font=("Segoe UI", 11), text_color=SILVER,
+        ctk.CTkLabel(right, text=(p.get("title") or "Chapter")[:28], font=(UI_FONT, 11), text_color=SILVER,
                      wraplength=142, justify="left", anchor="w").pack(fill="x", pady=(4, 0))
         ctk.CTkLabel(right, text=f'page {min(p.get("page", 0) + 1, 9999)} · {age_str(p.get("ts"))}',
-                     font=("Segoe UI", 10), text_color=MUTED, anchor="w").pack(fill="x", pady=(2, 0))
+                     font=(UI_FONT, 10), text_color=MUTED, anchor="w").pack(fill="x", pady=(2, 0))
         for w in (card, cov, right):
             w.bind("<Button-1>", lambda e, m=m: self.open_manga(m, resume=True))
             w.bind("<Enter>", lambda e, k=card: k.configure(fg_color=CARD_HI))
@@ -1274,7 +1354,7 @@ class App(ctk.CTk):
         self.rate_info.pack(side="right")
         ctk.CTkLabel(v, text="Right-click a cover (Library, Sources or a manga page) and pick "
                              '"★ Rate / comment" to give it 1-10 and write a note.',
-                     anchor="w", text_color=SILVER_DIM, font=("Segoe UI", 11)).pack(fill="x", padx=30, pady=(0, 8))
+                     anchor="w", text_color=SILVER_DIM, font=(UI_FONT, 11)).pack(fill="x", padx=30, pady=(0, 8))
         self.rate_scroll = ctk.CTkScrollableFrame(v, fg_color="transparent")
         self.rate_scroll.pack(fill="both", expand=True, padx=18, pady=(0, 12))
 
@@ -1288,7 +1368,7 @@ class App(ctk.CTk):
         if not items:
             ctk.CTkLabel(self.rate_scroll, text="Nothing rated yet.\nRight-click a manga and choose "
                                                 '"★ Rate / comment".',
-                         font=("Segoe UI", 14), text_color=MUTED, justify="left").pack(pady=90)
+                         font=(UI_FONT, 14), text_color=MUTED, justify="left").pack(pady=90)
             return
         cols = self.cols_for(card=268, host=self.rate_scroll, pad=24)
         for i, (key, r) in enumerate(items):
@@ -1303,13 +1383,13 @@ class App(ctk.CTk):
         cov.pack(side="left", padx=(6, 8), pady=6)
         right = ctk.CTkFrame(card, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True, padx=(0, 8), pady=6)
-        ctk.CTkLabel(right, text=m.get("title", "?"), font=("Segoe UI", 12, "bold"), text_color=TEXT,
+        ctk.CTkLabel(right, text=m.get("title", "?"), font=(UI_FONT, 12, "bold"), text_color=TEXT,
                      wraplength=138, justify="left", anchor="w").pack(fill="x")
-        ctk.CTkLabel(right, text=f"{r.get('score') or 0}/10", font=("Segoe UI", 20, "bold"), text_color=SILVER_HI,
+        ctk.CTkLabel(right, text=f"{r.get('score') or 0}/10", font=(UI_FONT, 20, "bold"), text_color=SILVER_HI,
                      anchor="w").pack(fill="x", pady=(2, 0))
         note = (r.get("note") or "").strip()
         if note:
-            ctk.CTkLabel(right, text=note[:150] + ("…" if len(note) > 150 else ""), font=("Segoe UI", 11),
+            ctk.CTkLabel(right, text=note[:150] + ("…" if len(note) > 150 else ""), font=(UI_FONT, 11),
                          text_color=MUTED, wraplength=138, justify="left", anchor="nw").pack(fill="x", pady=(4, 0))
         for w in (card, cov, right):
             w.bind("<Button-1>", lambda e, m=m: self.open_manga(m))
@@ -1338,12 +1418,12 @@ class App(ctk.CTk):
         # size or DPI scale, the buttons can no longer be pushed out of view.
         row2 = ctk.CTkFrame(win, fg_color="transparent")
         row2.pack(side="bottom", fill="x", padx=22, pady=(8, 14))
-        ctk.CTkLabel(win, text=m.get("title", "?"), font=("Segoe UI", 16, "bold"), text_color=SILVER_HI,
+        ctk.CTkLabel(win, text=m.get("title", "?"), font=(UI_FONT, 16, "bold"), text_color=SILVER_HI,
                      wraplength=int(540 * sc), justify="left", anchor="w").pack(fill="x", padx=22, pady=(20, 0))
         ctk.CTkLabel(win, text="Your score (1-10)", text_color=MUTED, anchor="w").pack(fill="x", padx=22, pady=(14, 0))
         row = ctk.CTkFrame(win, fg_color="transparent")
         row.pack(fill="x", padx=22, pady=(4, 0))
-        val = ctk.CTkLabel(row, text="", font=("Segoe UI", 22, "bold"), text_color=SILVER_HI, width=66, anchor="w")
+        val = ctk.CTkLabel(row, text="", font=(UI_FONT, 22, "bold"), text_color=SILVER_HI, width=66, anchor="w")
         val.pack(side="left")
         var = tk.IntVar(value=int(cur.get("score") or 7))
 
@@ -1358,7 +1438,7 @@ class App(ctk.CTk):
         val.configure(text=f"{var.get()}/10")
         ctk.CTkLabel(win, text="Comment (optional)", text_color=MUTED, anchor="w").pack(fill="x", padx=22, pady=(16, 0))
         box = ctk.CTkTextbox(win, fg_color=CARD, border_color=LINE, border_width=1, text_color=TEXT, wrap="word",
-                             font=("Segoe UI", 12), corner_radius=8)
+                             font=(UI_FONT, 12), corner_radius=8)
         box.pack(fill="both", expand=True, padx=22, pady=(4, 0))
         box.insert("1.0", cur.get("note") or "")
 
@@ -1375,7 +1455,7 @@ class App(ctk.CTk):
             btn(row2, "Remove rating", lambda: (self.remove_rating(m), win.destroy()), width=120).pack(side="left")
         win.transient(self)
         win.bind("<Escape>", lambda e: win.destroy())
-        win.grab_set()
+        grab_when_mapped(win)
 
     def remove_rating(self, m):
         DB["ratings"].pop(pkey(m), None)
@@ -1567,7 +1647,7 @@ class App(ctk.CTk):
         self.src_list.grid(row=0, column=0, sticky="ns", padx=(18, 10), pady=18)
         right = ctk.CTkFrame(v, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew", pady=18, padx=(0, 18))
-        self.src_title = ctk.CTkLabel(right, text="Pick a source", font=("Segoe UI", 22, "bold"), text_color=SILVER_HI, anchor="w")
+        self.src_title = ctk.CTkLabel(right, text="Pick a source", font=(UI_FONT, 22, "bold"), text_color=SILVER_HI, anchor="w")
         self.src_title.pack(fill="x", padx=4)
         bar = ctk.CTkFrame(right, fg_color="transparent")
         bar.pack(fill="x", pady=(8, 2))
@@ -1581,7 +1661,7 @@ class App(ctk.CTk):
         self.bstatus = ctk.CTkLabel(right, text="", text_color=MUTED, anchor="w")
         self.bstatus.pack(fill="x", padx=6)
         ctk.CTkLabel(right, text="Tip: right-click a cover to bookmark or file it.", anchor="w",
-                     text_color=SILVER_DIM, font=("Segoe UI", 11)).pack(fill="x", padx=6)
+                     text_color=SILVER_DIM, font=(UI_FONT, 11)).pack(fill="x", padx=6)
         self.browse_scroll = ctk.CTkScrollableFrame(right, fg_color="transparent")
         self.browse_scroll.pack(fill="both", expand=True)
         self.browse_scroll._parent_canvas.bind("<Configure>", lambda e: self.sched_reflow("src"), add="+")
@@ -1828,12 +1908,12 @@ class App(ctk.CTk):
         srcs = [s for s in self.searchable() if not want or s.id == want]
         if not srcs:
             ctk.CTkLabel(self.sres, text="No searchable source selected — check Settings.", text_color=MUTED,
-                         font=("Segoe UI", 14)).pack(pady=60)
+                         font=(UI_FONT, 14)).pack(pady=60)
             return
         for src in srcs:
             sec = ctk.CTkFrame(self.sres, corner_radius=12, fg_color=PANEL)
             sec.pack(fill="x", padx=6, pady=6)
-            hd = ctk.CTkLabel(sec, text=f"{src.name}  ·  searching…", font=("Segoe UI", 14, "bold"), text_color=SILVER, anchor="w")
+            hd = ctk.CTkLabel(sec, text=f"{src.name}  ·  searching…", font=(UI_FONT, 14, "bold"), text_color=SILVER, anchor="w")
             hd.pack(fill="x", padx=14, pady=(10, 4))
             bg(lambda src=src: src.listing("search", 1, q), lambda r, e, src=src, sec=sec, hd=hd: self.search_done(tok, src, sec, hd, r, e, q))
 
@@ -1889,7 +1969,7 @@ class App(ctk.CTk):
                              "The reader reuses saved chapters instead of downloading them again — even offline. "
                              "Double-click a row to open its folder.",
                      anchor="w", justify="left", wraplength=980, text_color=SILVER_DIM,
-                     font=("Segoe UI", 11)).pack(fill="x", padx=28, pady=(0, 6))
+                     font=(UI_FONT, 11)).pack(fill="x", padx=28, pady=(0, 6))
         box = ctk.CTkFrame(v, fg_color=CARD, corner_radius=12)
         box.pack(fill="both", expand=True, padx=28, pady=(0, 20))
         self.dtree_dl = ttk.Treeview(box, columns=("m", "c", "s"), show="headings", style="S.Treeview")
@@ -1994,7 +2074,7 @@ class App(ctk.CTk):
     def open_dir(self, p):
         os.makedirs(p, exist_ok=True)
         try:
-            os.startfile(p)
+            open_path(p)
         except Exception:
             pass
 
@@ -2008,7 +2088,7 @@ class App(ctk.CTk):
         def card(title):
             f = ctk.CTkFrame(scroll, fg_color=PANEL, corner_radius=12)
             f.pack(fill="x", padx=28, pady=6)
-            ctk.CTkLabel(f, text=title, font=("Segoe UI", 14, "bold"), text_color=SILVER, anchor="w").pack(fill="x", padx=16, pady=(12, 6))
+            ctk.CTkLabel(f, text=title, font=(UI_FONT, 14, "bold"), text_color=SILVER, anchor="w").pack(fill="x", padx=16, pady=(12, 6))
             return f
 
         def row(f):
@@ -2028,14 +2108,14 @@ class App(ctk.CTk):
         self.set_auto.set(self.auto_speed_name())
         self.set_auto.pack(side="left")
         ctk.CTkLabel(r, text="webtoon mode: A starts and stops it, , and . (or [ and ]) change the speed",
-                     text_color=MUTED, font=("Segoe UI", 11)).pack(side="left", padx=10)
+                     text_color=MUTED, font=(UI_FONT, 11)).pack(side="left", padx=10)
         r = row(f)
         ctk.CTkLabel(r, text="Background", text_color=TEXT, width=190, anchor="w").pack(side="left")
         self.set_paper = menu(r, PAPERS, self.apply_paper, width=200)
         self.set_paper.set(S("paper"))
         self.set_paper.pack(side="left")
         ctk.CTkLabel(r, text="the whole app, reader included", text_color=MUTED,
-                     font=("Segoe UI", 11)).pack(side="left", padx=10)
+                     font=(UI_FONT, 11)).pack(side="left", padx=10)
         r = row(f)
         self.sw_guides = ctk.CTkSwitch(r, text="In paged modes: black page borders, page numbers and the double-page gutter",
                                        progress_color=SILVER, button_color=SILVER_HI, text_color=TEXT,
@@ -2092,10 +2172,10 @@ class App(ctk.CTk):
         if not HAVE_TRAY:
             self.sw_notify.configure(state="disabled")
             ctk.CTkLabel(f, text="Toasts need the optional pystray package (pip install pystray).",
-                         text_color=MUTED, font=("Segoe UI", 11), anchor="w").pack(fill="x", padx=16, pady=(0, 6))
+                         text_color=MUTED, font=(UI_FONT, 11), anchor="w").pack(fill="x", padx=16, pady=(0, 6))
         ctk.CTkLabel(f, text="Off by default. Turning it on shows a tray icon while the app is open; closing the "
                              "window always quits the app, nothing keeps running or starts with Windows.",
-                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
+                     text_color=MUTED, font=(UI_FONT, 11), anchor="w", wraplength=900,
                      justify="left").pack(fill="x", padx=16, pady=(0, 10))
 
         f = card("Privacy")
@@ -2105,7 +2185,7 @@ class App(ctk.CTk):
         self.set_panic.set(S("panic_key"))
         self.set_panic.pack(side="left")
         ctk.CTkLabel(r, text="hides the window at once (the Hide button in the top bar does the same)",
-                     text_color=MUTED, font=("Segoe UI", 11)).pack(side="left", padx=10)
+                     text_color=MUTED, font=(UI_FONT, 11)).pack(side="left", padx=10)
         r = row(f)
         ctk.CTkLabel(r, text="PIN lock (optional)", text_color=TEXT, width=190, anchor="w").pack(side="left")
         self.pin_lbl = ctk.CTkLabel(r, text="", text_color=MUTED, width=90, anchor="w")
@@ -2131,7 +2211,7 @@ class App(ctk.CTk):
             self.sw_pin_hide.select()
         ctk.CTkLabel(f, text="The PIN only covers the app window; it does not encrypt your library or downloads. "
                              "While the app is locked, toasts never show titles.",
-                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
+                     text_color=MUTED, font=(UI_FONT, 11), anchor="w", wraplength=900,
                      justify="left").pack(fill="x", padx=16, pady=(4, 12))
         self.refresh_pin_ui()
 
@@ -2153,7 +2233,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(f, text="Updates come from this project's GitHub releases. The installer replaces only the "
                              "app files - your library, progress, cache and downloads stay in the data folder, "
                              "and db.json is backed up before every update.",
-                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
+                     text_color=MUTED, font=(UI_FONT, 11), anchor="w", wraplength=900,
                      justify="left").pack(fill="x", padx=16, pady=(4, 12))
 
         f = card("Report a bug / request a feature")
@@ -2177,7 +2257,7 @@ class App(ctk.CTk):
         self.br_status.pack(side="left", padx=10)
         ctk.CTkLabel(f, text="Opens a new issue on GitHub in your browser with the text and diagnostics filled in — "
                              "you review it and press Submit. Nothing is sent automatically.",
-                     text_color=MUTED, font=("Segoe UI", 11), anchor="w", wraplength=900,
+                     text_color=MUTED, font=(UI_FONT, 11), anchor="w", wraplength=900,
                      justify="left").pack(fill="x", padx=16, pady=(4, 12))
 
         f = card("Downloads (saved as one .cbz per chapter)")
@@ -2200,7 +2280,7 @@ class App(ctk.CTk):
         sl.pack(side="left")
         self.delay_lbl.pack(side="left", padx=8)
         ctk.CTkLabel(f, text="Higher delay = safer against bans. Pages already viewed in the reader are reused without any request.",
-                     text_color=MUTED, font=("Segoe UI", 11), anchor="w").pack(fill="x", padx=16, pady=(0, 12))
+                     text_color=MUTED, font=(UI_FONT, 11), anchor="w").pack(fill="x", padx=16, pady=(0, 12))
 
         f = card("Sources")
         r = row(f)
@@ -2223,12 +2303,12 @@ class App(ctk.CTk):
             swg.select()
         self.repo_status = ctk.CTkLabel(f, text="", text_color=MUTED, anchor="w")
         self.repo_status.pack(fill="x", padx=16)
-        ctk.CTkLabel(f, text=f"Config file in use: {SRC_FILE}", text_color=SILVER_DIM, font=("Segoe UI", 11),
+        ctk.CTkLabel(f, text=f"Config file in use: {SRC_FILE}", text_color=SILVER_DIM, font=(UI_FONT, 11),
                      anchor="w", wraplength=900, justify="left").pack(fill="x", padx=16, pady=(2, 0))
         self.repo_list = ctk.CTkLabel(f, text="", anchor="w", justify="left", text_color=TEXT)
         self.repo_list.pack(fill="x", padx=16, pady=(4, 0))
         ctk.CTkLabel(f, text="Sources shown in the Sources tab - untick any you don't want:", text_color=MUTED,
-                     font=("Segoe UI", 11), anchor="w").pack(fill="x", padx=16, pady=(6, 2))
+                     font=(UI_FONT, 11), anchor="w").pack(fill="x", padx=16, pady=(6, 2))
         self.src_grid = ctk.CTkFrame(f, fg_color="transparent")
         self.src_grid.pack(fill="x", padx=16, pady=(0, 14))
         self.build_src_toggles()
@@ -2399,13 +2479,13 @@ class App(ctk.CTk):
         panel = ctk.CTkFrame(win, fg_color=PANEL, corner_radius=0)
         panel.pack(fill="both", expand=True)
         ctk.CTkLabel(panel, text=f"Version {tag.lstrip('vV')} is available",
-                     font=("Segoe UI", 16, "bold"), text_color=SILVER_HI).pack(anchor="w", padx=20, pady=(18, 2))
+                     font=(UI_FONT, 16, "bold"), text_color=SILVER_HI).pack(anchor="w", padx=20, pady=(18, 2))
         ctk.CTkLabel(panel, text=f"You have {APP_VERSION}.", text_color=MUTED,
-                     font=("Segoe UI", 11)).pack(anchor="w", padx=20)
+                     font=(UI_FONT, 11)).pack(anchor="w", padx=20)
         notes = (info.get("notes") or "").strip()
         if notes:
             tb = ctk.CTkTextbox(panel, height=150, fg_color=CARD, border_color=LINE, border_width=1,
-                                text_color=TEXT, font=("Segoe UI", 11), corner_radius=8, wrap="word")
+                                text_color=TEXT, font=(UI_FONT, 11), corner_radius=8, wrap="word")
             tb.pack(fill="both", expand=True, padx=20, pady=10)
             tb.insert("1.0", notes[:3000])
             tb.configure(state="disabled")
@@ -2428,6 +2508,9 @@ class App(ctk.CTk):
         if can_install:
             note = (f"Your library, progress, cache and downloads stay in {DATA}. "
                     "db.json is backed up to data\\backups before the installer runs.")
+        elif not WIN:
+            note = ("On Linux the updater only opens the release page: download the new Linux build "
+                    f"there (or `git pull` a source checkout). Your data folder stays at {DATA}.")
         elif not frozen:
             note = ("This is a source checkout, so the updater only opens the release page. "
                     f"Your data folder is {DATA}.")
@@ -2436,7 +2519,7 @@ class App(ctk.CTk):
                     f"Download the installer from the release page; this data folder stays at {DATA}.")
         else:
             note = "The release has no installer asset; open the release page to download it."
-        ctk.CTkLabel(panel, text=note, text_color=MUTED, font=("Segoe UI", 11),
+        ctk.CTkLabel(panel, text=note, text_color=MUTED, font=(UI_FONT, 11),
                      wraplength=520, justify="left").pack(fill="x", padx=20, pady=(0, 14))
         win.protocol("WM_DELETE_WINDOW", lambda: self.update_later(info, win))
         win.update_idletasks()
@@ -2448,7 +2531,7 @@ class App(ctk.CTk):
             win.attributes("-topmost", True)
         except Exception:
             pass
-        win.grab_set()
+        grab_when_mapped(win)
         win.lift()
         win.after(60, win.focus_force)
         self._upd_status(f"Version {tag.lstrip('vV')} is available.")
@@ -2642,11 +2725,11 @@ class App(ctk.CTk):
         self.d_cover.pack(side="left", anchor="n")
         right = ctk.CTkFrame(top, fg_color="transparent")
         right.pack(side="left", fill="both", expand=True, padx=20)
-        self.d_title = ctk.CTkLabel(right, text="", font=("Segoe UI", 25, "bold"), text_color=SILVER_HI, wraplength=760, justify="left", anchor="w")
+        self.d_title = ctk.CTkLabel(right, text="", font=(UI_FONT, 25, "bold"), text_color=SILVER_HI, wraplength=760, justify="left", anchor="w")
         self.d_title.pack(fill="x")
         self.d_src = ctk.CTkLabel(right, text="", text_color=MUTED, anchor="w")
         self.d_src.pack(fill="x", pady=(0, 2))
-        self.d_genres = ctk.CTkLabel(right, text="", text_color=SILVER_DIM, font=("Segoe UI", 11),
+        self.d_genres = ctk.CTkLabel(right, text="", text_color=SILVER_DIM, font=(UI_FONT, 11),
                                      anchor="w", wraplength=760, justify="left")
         self.d_genres.pack(fill="x", pady=(0, 8))
         row = ctk.CTkFrame(right, fg_color="transparent")
@@ -2659,14 +2742,14 @@ class App(ctk.CTk):
         self.d_dl.pack(side="left")
         self.d_rate = btn(row, "★ Rate", lambda: self.cur_detail and self.rate_manga(self.cur_detail[0]), width=110)
         self.d_rate.pack(side="left", padx=8)
-        self.d_desc = ctk.CTkLabel(right, text="", wraplength=760, justify="left", anchor="nw", text_color=MUTED, font=("Segoe UI", 12))
+        self.d_desc = ctk.CTkLabel(right, text="", wraplength=760, justify="left", anchor="nw", text_color=MUTED, font=(UI_FONT, 12))
         self.d_desc.pack(fill="x", pady=(12, 0))
         self.d_more = ctk.CTkLabel(right, text="", text_color=SILVER, cursor="hand2", anchor="w")
         self.d_more.pack(fill="x")
         self.d_more.bind("<Button-1>", lambda e: self.toggle_desc())
         hdr = ctk.CTkFrame(v, fg_color="transparent")
         hdr.pack(fill="x", padx=24, pady=(14, 4))
-        self.d_count = ctk.CTkLabel(hdr, text="", font=("Segoe UI", 15, "bold"), text_color=SILVER_HI)
+        self.d_count = ctk.CTkLabel(hdr, text="", font=(UI_FONT, 15, "bold"), text_color=SILVER_HI)
         self.d_count.pack(side="left")
         self.d_prog = ctk.CTkProgressBar(hdr, width=170, height=8, progress_color=SILVER, fg_color=BTN)
         self.d_prog.set(0)
@@ -2799,7 +2882,7 @@ class App(ctk.CTk):
             ans["restart"] = restart
             win.destroy()
 
-        ctk.CTkLabel(win, text="Continue where you left off?", font=("Segoe UI", 17, "bold"),
+        ctk.CTkLabel(win, text="Continue where you left off?", font=(UI_FONT, 17, "bold"),
                      text_color=SILVER_HI).pack(pady=(26, 4))
         ctk.CTkLabel(win, text=f"{chapter} — saved at page {page + 1}", text_color=MUTED).pack()
         row = ctk.CTkFrame(win, fg_color="transparent")
@@ -2814,7 +2897,7 @@ class App(ctk.CTk):
             x = self.winfo_rootx() + (self.winfo_width() - 460) // 2
             y = self.winfo_rooty() + (self.winfo_height() - 210) // 3
             win.geometry(f"+{max(0, x)}+{max(0, y)}")
-            win.grab_set()
+            grab_when_mapped(win)
         except Exception:
             pass
         self.wait_window(win)
@@ -2955,7 +3038,7 @@ class App(ctk.CTk):
         bar = ctk.CTkFrame(v, height=54, corner_radius=0, fg_color=SIDE)
         bar.pack(fill="x")
         btn(bar, "← Back", self.reader_back, width=76).pack(side="left", padx=(12, 8), pady=10)
-        self.r_title = ctk.CTkLabel(bar, text="", font=("Segoe UI", 13, "bold"), text_color=TEXT)
+        self.r_title = ctk.CTkLabel(bar, text="", font=(UI_FONT, 13, "bold"), text_color=TEXT)
         self.r_title.pack(side="left", padx=8)
         self.r_bm = btn(bar, "☆ Bookmark", lambda: self.toggle_bm_m(self.reader["m"] if self.reader else None), width=118)
         self.r_bm.pack(side="left", padx=(2, 8))
@@ -3140,16 +3223,16 @@ class App(ctk.CTk):
         panel.pack(fill="both", expand=True, padx=1, pady=1)
 
         ctk.CTkLabel(panel, text="Jump to chapter", height=28,
-                     font=("Segoe UI", 11, "bold"), text_color=MUTED, fg_color=CARD,
+                     font=(UI_FONT, 11, "bold"), text_color=MUTED, fg_color=CARD,
                      corner_radius=0).pack(fill="x", padx=(2, 2), pady=(2, 4))
         go = ctk.CTkFrame(panel, fg_color=PANEL)
         go.pack(fill="x", padx=10, pady=(0, 2))
-        ctk.CTkLabel(go, text="Chapter", font=("Segoe UI", 11), text_color=TEXT).pack(side="left")
+        ctk.CTkLabel(go, text="Chapter", font=(UI_FONT, 11), text_color=TEXT).pack(side="left")
         ent = ctk.CTkEntry(go, width=122, height=30, placeholder_text="number",
-                           font=("Segoe UI", 11))
+                           font=(UI_FONT, 11))
         ent.pack(side="left", padx=6)
         err = ctk.CTkLabel(panel, text="", height=18, anchor="w",
-                           font=("Segoe UI", 10), text_color="#e06c75")
+                           font=(UI_FONT, 10), text_color="#e06c75")
         err.pack(fill="x", padx=12, pady=(0, 2))
 
         def submit():
@@ -3165,7 +3248,7 @@ class App(ctk.CTk):
         # chapters; building that many CTk widgets blocked Tk for seconds.
         lb = tk.Listbox(body, bg=PANEL, fg=TEXT, selectbackground=BTN_HI, selectforeground=SILVER_HI,
                         highlightthickness=0, borderwidth=0, relief="flat", exportselection=False,
-                        activestyle="none", font=("Segoe UI", 11))
+                        activestyle="none", font=(UI_FONT, 11))
         sb = ctk.CTkScrollbar(body, command=lb.yview)
         lb.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y", padx=(0, 4), pady=2)
@@ -3188,9 +3271,9 @@ class App(ctk.CTk):
             if 0 <= i < len(labels):
                 self._chs_pick(labels[i], win)
 
-        lb.bind("<MouseWheel>", wheel)
+        bind_wheel(lb, wheel)
         lb.bind("<ButtonRelease-1>", pick)
-        win.bind("<MouseWheel>", wheel)
+        bind_wheel(win, wheel)
 
         w = 400
         hpx = min(170 + len(labels) * 22, 600)
@@ -3211,8 +3294,10 @@ class App(ctk.CTk):
             pass
         win.deiconify()
         win.lift()
-        win.grab_set()
+        grab_when_mapped(win)
         ent.focus_set()
+        if not WIN:   # an overrideredirect popup only gets the keyboard on X11 when asked for it
+            win.after(60, ent.focus_force)
         ent.icursor("end")
         win.bind("<Escape>", lambda e: win.destroy())
 
@@ -3258,7 +3343,7 @@ class App(ctk.CTk):
         elif r["err"] or not r["urls"]:
             msg = f"Could not load pages: {r['err'] or 'none found'}"
         if msg:
-            ctk.CTkLabel(self.rbody, text=msg, font=("Segoe UI", 15), text_color=reader_muted()).pack(pady=80)
+            ctk.CTkLabel(self.rbody, text=msg, font=(UI_FONT, 15), text_color=reader_muted()).pack(pady=80)
             return
         self.update_idletasks()
         self.build_webtoon() if self.is_web() else self.build_paged()
@@ -3326,7 +3411,7 @@ class App(ctk.CTk):
             bd = c.create_rectangle(x - 1, y - 1, x + w + 1, y + h + 1, outline="#000000", width=3)
             it = c.create_image(x, y, anchor="nw", image=ph)
             tx = c.create_text(x + w / 2, y + h / 2, anchor="center", text=f"Page {i + 1}",
-                               fill=reader_muted(), font=("Segoe UI", 11))
+                               fill=reader_muted(), font=(UI_FONT, 11))
             c.tag_bind(it, "<Button-1>", lambda e, i=i: self.wt_retry(i))
             c.tag_bind(tx, "<Button-1>", lambda e, i=i: self.wt_retry(i))
             r["borders"].append(bd)
@@ -3335,7 +3420,7 @@ class App(ctk.CTk):
             y += h
         if r["idx"] + 1 < len(r["chs"]):
             rect = c.create_rectangle(0, 0, 0, 0, fill=SILVER, outline="")
-            txt = c.create_text(0, 0, text="Next chapter ▶", fill=INK, font=("Segoe UI", 12, "bold"))
+            txt = c.create_text(0, 0, text="Next chapter ▶", fill=INK, font=(UI_FONT, 12, "bold"))
             c.tag_bind(rect, "<Button-1>", lambda e: self.chapter_step(1))
             c.tag_bind(txt, "<Button-1>", lambda e: self.chapter_step(1))
             r["nextbtn"] = (rect, txt)
@@ -3837,7 +3922,7 @@ class App(ctk.CTk):
                     c.create_image(x, y, anchor="nw", image=tile)
         if any(im is None for im in ims):
             failed = any(i in r["failed"] for i in sp)
-            c.create_text(cw / 2, ch / 2, text="Page failed to load — click to retry" if failed else "Loading…", fill=reader_muted(), font=("Segoe UI", 14))
+            c.create_text(cw / 2, ch / 2, text="Page failed to load — click to retry" if failed else "Loading…", fill=reader_muted(), font=(UI_FONT, 14))
             return
         rtl = self.is_rtl()
         pairs = list(zip(sp, ims))
@@ -3870,7 +3955,7 @@ class App(ctk.CTk):
             return
         for pi, lx, lw in r["lays"]:  # thick black contour + page number per visible page
             c.create_rectangle(left + lx, top, left + lx + lw, top + h, outline="#000000", width=PAGE_BORDER)
-            c.create_text(left + lx + lw / 2, top + h - 14, text=str(pi + 1), fill=reader_muted(), font=("Segoe UI", 11))
+            c.create_text(left + lx + lw / 2, top + h - 14, text=str(pi + 1), fill=reader_muted(), font=(UI_FONT, 11))
         if len(r["lays"]) == 2:  # little binding mark in the middle of the gutter
             _, lx, lw = r["lays"][0]
             gx = left + lx + lw + gap / 2
@@ -4161,6 +4246,11 @@ class App(ctk.CTk):
             return
         r = self.reader
         if self.cur != "Reader" or not r or "c" not in r:
+            if X11 and not OLD_X11_WHEEL:
+                # customtkinter's scroll frames only listen for Button-4/5 on Linux, which Tk 9 no longer sends
+                c = self._scroll_canvas_at(e)
+                if c is not None and c.yview() != (0.0, 1.0):
+                    c.yview_scroll(-1 if e.delta > 0 else 1, "units")
             return
         if e.state & 0x4:  # Ctrl + wheel = zoom
             self.zoom_by(1 if e.delta > 0 else -1)

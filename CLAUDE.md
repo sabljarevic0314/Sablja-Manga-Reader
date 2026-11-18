@@ -1,6 +1,6 @@
 # Sablja Reader — notes for Claude
 
-Windows desktop manga/webtoon reader written in Python (customtkinter + Tk). Current version: **1.4.3**
+Windows/Linux desktop manga/webtoon reader written in Python (customtkinter + Tk). Current version: **1.4.3**
 (`config.py`, `APP_VERSION`). Repo: `sabljarevic0314/Sablja-Manga-Reader`.
 
 **Read `AGENTS.md` before touching any source.** It holds the non-negotiable rules for sources
@@ -90,7 +90,10 @@ The release workflow builds and attaches the installer.
 - Card size is 164x232 (grid cell 188). Keep it. Column count comes from the real canvas width.
 - Page appends use `grid_cards(..., append=True)`.
 - Don't add per-chapter widgets to the reader. The chapter picker is a Tk `Listbox` with a number-entry path.
-- The app is Windows-only in practice (`os.startfile`, `winreg`, `\` paths in `data\`).
+- The app runs on Windows and Linux. Keep platform branches behind `WIN` (`SabljaReader.py`). Use `open_path()`
+  rather than `os.startfile`, `bind_wheel()` rather than a bare `<MouseWheel>` bind (X11 sends Button-4/5),
+  `grab_when_mapped()` rather than `grab_set()`, and `UI_FONT` rather than a font name. Linux build:
+  `./build.sh`, then `dist/install-linux.sh`. The updater only installs on Windows (`running_installed()` needs `winreg`).
 
 ## Git identity
 

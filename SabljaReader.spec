@@ -1,13 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Single-file build: the exe lands in dist\ right next to dist\sources.json and dist\data,
-# which is the layout the app (BASE = folder of the exe) and build.ps1 both expect.
+# which is the layout the app (BASE = folder of the exe) and build.ps1 / build.sh both expect.
+import sys
+
+WIN = sys.platform == "win32"
 
 a = Analysis(
     ['SabljaReader.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['pystray._win32'],
+    # PIL._imagingtk and PIL._tkinter_finder are imported lazily inside PIL.ImageTk, so PyInstaller can't see it; without it every
+    # ImageTk.PhotoImage fails in the frozen app ("invalid command name PyImagingPhoto") and no image draws.
+    hiddenimports=['PIL._imagingtk', 'PIL._tkinter_finder'] + (['pystray._win32'] if WIN else ['pystray._appindicator', 'pystray._gtk', 'pystray._xorg']),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -24,11 +29,11 @@ exe = EXE(
     a.datas,
     [],
     name='SabljaReader',
-    icon='SabljaReader.ico',   # exe, taskbar and shortcut logo
+    icon='SabljaReader.ico' if WIN else None,   # exe, taskbar and shortcut logo (Linux: set at runtime)
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=WIN,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,          # no black console window behind the app

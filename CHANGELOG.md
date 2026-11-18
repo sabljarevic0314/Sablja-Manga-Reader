@@ -3,6 +3,26 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## Unreleased
+
+### Added
+
+- **Linux support.** The app runs from source on Linux (X11 and Wayland/XWayland). `build.sh` builds
+  a single-file Linux binary. `installer/install-linux.sh` installs it per-user with an app-menu entry
+  and keeps `data/` across updates. Releases now also ship `SabljaReader-linux-x86_64.tar.gz`, and CI
+  checks Ubuntu as well as Windows.
+
+### Fixed (non-Windows)
+
+- The mouse wheel now works in the reader, the card grids and the chapter picker on X11. That covers
+  both Tk 8.6, which sends the wheel as Button-4/5 events, and Tk 9, which sends MouseWheel events.
+- **Open folder** uses `xdg-open` (or `open` on macOS) instead of the Windows-only `os.startfile`.
+- Fullscreen uses the window manager's real fullscreen, because borderless override-redirect windows
+  can't get keyboard focus there. The window icon is set from a PNG, since Tk only reads `.ico` files
+  on Windows.
+- Dialogs no longer fail with "grab failed: window not viewable", and the chapter picker's number
+  box gets keyboard focus.
+
 ## 1.4.3 — 2026-11-08
 
 ### Added
