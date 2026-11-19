@@ -110,6 +110,7 @@ WT_KEEP = 1                # extra pages kept before an image is dropped from me
 WT_MAX_PX = 14000000       # cap for one page's Tk image (~56 MB): tall strips are the memory hogs
 WT_STRIP = 1000            # tall pages are shown as stacked strips of at most this height
 WT_STRIPS_PER_TICK = 2     # strip images built per frame, so a huge page never blocks scrolling
+GRID_MAX_PX = 30000        # X11 refuses windows/pixmaps over 32767 px (BadAlloc kills the app): cap a card grid
 # Middle-click auto-scroll: the pointer's distance from the viewport centre sets direction and
 # speed, so a middle click in the lower half starts a slow downward scroll without any dragging.
 MMB_DEAD = 26              # px around the viewport centre where the view stands still
@@ -1733,7 +1734,7 @@ class App(ctk.CTk):
             self.browse_scroll.update_idletasks()   # real inner width before choosing columns
         except Exception:
             pass
-        b.update(kind=kind, query=q, genre=genre, page=1, n=0, tok=b["tok"] + 1, loading=False, has_more=True, err=None,
+        b.update(kind=kind, query=q, genre=genre, page=1, n=0, tok=b["tok"] + 1, loading=False, has_more=True, err=None, full=False,
                  seen=set(), pool={}, cols=self.cols_for(host=self.browse_scroll, pad=24, extra=220), shuffle_tok=b.get("shuffle_tok", 0) + 1,
                  render=b.get("render", 0) + 1)
         for k, bt in self.kind_btns.items():
@@ -1757,9 +1758,46 @@ class App(ctk.CTk):
         except Exception:
             pass
 
+    def browse_full(self, b):
+        """True when one more listing page would push the card grid past GRID_MAX_PX."""
+        cols = max(1, b.get("cols") or 1)
+        if not b["n"]:
+            return False
+        try:
+            sc = float(ctk.ScalingTracker.get_widget_scaling(self.browse_scroll))
+        except Exception:
+            sc = 1.0
+        rh = 420 * sc                       # rough row height until real cards can be measured
+        try:
+            built = sum(1 for w in self.holder.winfo_children() if hasattr(w, "grid_idx"))
+            hb = self.holder.winfo_reqheight()
+            if built and hb > 1:
+                rh = hb / float(-(-built // cols))
+        except Exception:
+            pass
+        rows = -(-(b["n"] + b.get("last_batch", 40)) // cols)
+        return rows * rh > GRID_MAX_PX
+
+    def browse_next_chunk(self, b):
+        """Drop the full grid and carry on from the next listing page in a fresh one."""
+        if b is not self.b:
+            return
+        b["full"] = False
+        b["render"] = b.get("render", 0) + 1   # cancel cards of the old grid still queued
+        clear(self.holder)
+        b["n"] = 0
+        self.footer.unbind("<Button-1>")
+        self.footer.configure(cursor="")
+        self.load_more()
+
     def load_more(self):
         b = self.b
-        if b["loading"] or not b["has_more"]:
+        if b["loading"] or not b["has_more"] or b.get("full"):
+            return
+        if self.browse_full(b):
+            b["full"] = True
+            self.footer.configure(text=f"{b['n']} cards shown — click here for the next ones", cursor="hand2")
+            self.footer.bind("<Button-1>", lambda ev: self.browse_next_chunk(b))
             return
         b["loading"], tok = True, b["tok"]
         self.footer.configure(text="Loading…")
@@ -1786,6 +1824,7 @@ class App(ctk.CTk):
         self.grid_cards(self.holder, new, b["cols"], self.open_manga, start=b["n"], ctx=self.card_ctx,
                         alive=lambda: self.b is b and b.get("render") == rgen, append=not first)
         b["n"] += len(new)
+        b["last_batch"] = len(new)
         b["page"] += 1
         self.footer.configure(text="")
         if first:
@@ -1857,6 +1896,7 @@ class App(ctk.CTk):
         self.grid_cards(self.holder, shown, b["cols"], self.open_manga, start=0, ctx=self.card_ctx,
                         alive=lambda: self.b is b and b.get("render") == rgen)
         b["n"] = len(shown)
+        b["full"] = False
         self.footer.configure(text="")
         self.bstatus.configure(text=f"Shuffled {len(shown)} cards — press Shuffle again for a new mix")
         self.after_idle(self.reset_browse_scroll)

@@ -3,6 +3,16 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## 1.4.7 — 2026-11-19
+
+### Fixed
+
+- **Crash after scrolling far down a source** (seen on Linux with WeebCentral after about 200 cards).
+  The browse grid grew past 32,767 px, the limit X11 puts on a window or image, and the app was
+  killed with `BadAlloc` without writing to `errors.log`. The grid now stops at about 30,000 px and
+  the footer offers *click here for the next ones*, which clears the grid and continues with the next
+  listing page. Nothing is skipped or repeated.
+
 ## 1.4.6 — 2026-11-18
 
 ### Added
