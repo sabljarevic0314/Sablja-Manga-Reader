@@ -1,15 +1,27 @@
-# Build SabljaReader.exe and publish the canonical sources.json next to it.
-#
-# From now on the project-root sources.json is the one and only file you edit.
-# This script copies it into dist\ so the exe always reads exactly what you edited.
+# Build dist\SabljaReader.exe (the Flet app, one file) and publish sources.json next to it.
 #
 #   .\build.ps1
 #
+# Needs: pip install -r requirements.txt pyinstaller flet-cli==1.1.2
+# `flet pack` wraps PyInstaller and bundles the Flutter client; it writes a throwaway SabljaReader.spec
+# and build\ (both gitignored). The project-root sources.json is the one you edit: it's copied into dist\.
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-python -m PyInstaller --noconfirm SabljaReader.spec
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit $LASTEXITCODE)" }
+$cfg = Get-Content config.py -Raw
+if ($cfg -notmatch '(?m)^APP_VERSION\s*=\s*"([^"]+)"') { throw "Could not read APP_VERSION from config.py" }
+$ver = $Matches[1]
+Write-Host "Building Sablja Reader $ver"
+
+$py = if (Test-Path .venv\Scripts\python.exe) { ".venv\Scripts\python.exe" } else { "python" }
+& $py -m flet_cli.cli pack main.py -y `
+    --name SabljaReader --icon SabljaReader.ico --distpath dist `
+    --add-data "assets/gifs:assets/gifs" `
+    --hidden-import pystray._win32 `
+    --product-name "Sablja Reader" --file-description "Sablja Reader" --company-name "Sablja Reader" `
+    --product-version $ver --file-version "$ver.0" --copyright "Sablja Reader"
+if ($LASTEXITCODE -ne 0) { throw "flet pack failed (exit $LASTEXITCODE)" }
+Remove-Item SabljaReader.spec -ErrorAction SilentlyContinue
 
 Copy-Item sources.json dist\sources.json -Force
 

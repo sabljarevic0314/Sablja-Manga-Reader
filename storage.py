@@ -18,7 +18,7 @@ def load_db() -> dict[str, Any]:
             db = json.load(f)
     except Exception:
         db = {}
-    for k, v in dict(bookmarks=[], progress={}, last=None, folders=[], set={}, downloads=[], ratings={},
+    for k, v in dict(bookmarks=[], progress={}, last=None, folders=[], set={}, downloads=[], ratings={}, log={},
                      meta={}).items():
         db.setdefault(k, v)
     if isinstance(db.get("set"), dict):

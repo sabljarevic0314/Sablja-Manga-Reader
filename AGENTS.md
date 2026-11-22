@@ -28,19 +28,18 @@ Every new source must pass all of these before it is added to `sources.json`:
    - Use the site’s real cover URL, and prefer a smaller CDN/thumbnail variant when one
      exists. If the listing emits broken local cover paths, use `cover_rewrite` to point at
      the site’s working CDN copy instead of letting every card retry a 404.
-   - Covers load through `load_img`/`THUMB_CACHE`; do not bypass that pipeline.
+   - Covers load through the thumbnail pipeline in `ui/core.py`; do not bypass it.
 
 4. **18+ sources always go last.**
    - In `sources.json`, every entry with `"nsfw": true` belongs after every regular source.
    - `rebuild_sources()` also sorts NSFW sources last, so file order cannot break this.
 
 5. **Reader navigation must stay usable on 1,000+ chapter titles.**
-   - The chapter picker is a Tk `Listbox` (not one widget per chapter).
-   - It must keep a direct “type a chapter number and press Enter” path. If the number does
-     not exist, show a small inline error instead of closing the picker.
-   - The numeric entry must have focus when the picker opens. Keep the `Toplevel` withdrawn
-     until its geometry is set; mapping it first snapped the popup to the top-left corner.
-   - Do not reintroduce per-chapter buttons or a blocking synchronous menu build.
+   - The chapter picker (C in the reader, `ui/reader.py`) is a lazy `ft.ListView` with a fixed
+     `item_extent`, never one heavyweight widget per chapter built up front.
+   - It must keep a direct “type a chapter number and press Enter” path, with focus in that field
+     when the picker opens. If the number does not exist, show a small inline error instead of
+     closing the picker.
 
 6. **Do not re-add MangaDex** to the bundled list. It was removed for broken/empty entries,
    mixed languages, and missing chapters.
@@ -54,25 +53,23 @@ Every new source must pass all of these before it is added to `sources.json`:
 
 ## Card grid rules
 
-- `cols_for()` must use the real scroll canvas width minus the scrollbar and a safety
-  margin. Guessing from the main window width over-counts columns and clips the last card.
-- Page appends must use `grid_cards(..., append=True)`. Bumping the render generation while
-  appending cancels the tail of the previous page and leaves holes in the grid.
-- The normal card size is **164x232** (grid cell 188 px). Keep the larger size; the user
-  prefers fewer, bigger cards over a dense wall.
+- Grids are `ft.GridView` with `max_extent` from `DENSITY` (S / M / L) and `child_aspect_ratio=0.69`;
+  the column count follows the real width. Don't build fixed-size rows by hand.
+- Appending a page adds controls to the existing grid. Never rebuild the whole grid to append, and
+  never bump the view's generation counter for an append (that drops the tail of the last page).
+- Cards come only from listing HTML; cover thumbnails go through `ui/core.py` (`thumb`, `cover_image`).
 
 ## Verification commands
 
 ```powershell
-python -m py_compile SabljaReader.py
+.venv\Scripts\python -m compileall -q main.py config.py storage.py sources.py downloads.py desktop.py stats.py updater.py ui
 python -c "import json; json.load(open('sources.json', encoding='utf-8'))"
 ```
 
 Live source test (from the repo root):
 
 ```powershell
-$env:PYTHONPATH=(Get-Location).Path
-python -c "import SabljaReader as S; S.rebuild_sources(); print([s.name for s in S.SOURCES.values()])"
+.venv\Scripts\python -c "import sources as S; S.rebuild_sources(); print([s.name for s in S.SOURCES.values()])"
 ```
 
 When a source is changed, test page 1 and page 2 explicitly and compare the returned URLs.
@@ -80,9 +77,9 @@ When a source is changed, test page 1 and page 2 explicitly and compare the retu
 ## Build workflow
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .uild.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
 ```
 
-`build.ps1` rebuilds the exe and copies `sources.json`. The installer is a separate step;
+`build.ps1` runs `flet pack` (exe + `sources.json` in `dist\`). The installer is a separate step;
 `dist\SabljaReader-Setup.exe` is not refreshed by `build.ps1` alone.

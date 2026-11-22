@@ -11,7 +11,7 @@ Name "Sablja Reader"
 ; make_setup.ps1 passes the version from SabljaReader.py's APP_VERSION; this fallback is only
 ; for running makensis directly.
 !ifndef APP_VERSION
-  !define APP_VERSION "1.4.1"
+  !define APP_VERSION "2.0.0"
 !endif
 VIProductVersion "${APP_VERSION}.0"
 VIFileVersion "${APP_VERSION}.0"
@@ -43,8 +43,11 @@ SetCompressor /SOLID lzma
 
 Section "Sablja Reader" SecMain
   SetShellVarContext current
-  ; a running copy would lock the exe
-  nsExec::Exec 'taskkill /IM SabljaReader.exe /F'
+  ; A running copy would lock the exe. Ask it to close first (it saves db.json on the way out), then
+  ; force what's left. /T takes the Flutter window (flet.exe, a child process) down with it.
+  nsExec::Exec 'taskkill /IM SabljaReader.exe /T'
+  Sleep 2000
+  nsExec::Exec 'taskkill /IM SabljaReader.exe /T /F'
   Sleep 500
 
   SetOutPath "$INSTDIR"
@@ -67,7 +70,7 @@ Section "Sablja Reader" SecMain
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "NoRepair" 1
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "EstimatedSize" 26000
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SabljaReader" "EstimatedSize" 92000
 
   CreateDirectory "$SMPROGRAMS\Sablja Reader"
   CreateShortCut "$SMPROGRAMS\Sablja Reader\Sablja Reader.lnk" "$INSTDIR\SabljaReader.exe"
@@ -77,7 +80,9 @@ SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
-  nsExec::Exec 'taskkill /IM SabljaReader.exe /F'
+  nsExec::Exec 'taskkill /IM SabljaReader.exe /T'
+  Sleep 2000
+  nsExec::Exec 'taskkill /IM SabljaReader.exe /T /F'
   Sleep 500
 
   Delete "$INSTDIR\SabljaReader.exe"

@@ -6,10 +6,7 @@ on:
 
 jobs:
   check:
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,7 +17,7 @@ jobs:
           python-version: "3.13"
 
       - name: Compile the app
-        run: python -m py_compile SabljaReader.py
+        run: python -m compileall -q main.py config.py storage.py sources.py downloads.py desktop.py stats.py assets.py updater.py autoprobe.py ui tools
 
       - name: Validate sources.json
         run: python -c "import json; json.load(open('sources.json', encoding='utf-8')); print('sources.json OK')"

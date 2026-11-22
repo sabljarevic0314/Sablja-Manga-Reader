@@ -1,7 +1,8 @@
 # Sablja Reader - run from source with:
 #   pip install -r requirements.txt
-#   python SabljaReader.py
-customtkinter
+#   python main.py
+# Building the exe also needs:  pip install pyinstaller flet-cli==1.1.2   (then .\build.ps1)
+flet==1.1.2   # the UI (Flutter); same version as Sablja Fitness
 pillow
 beautifulsoup4
 lxml          # fast HTML parser for BeautifulSoup (falls back to html.parser when absent)

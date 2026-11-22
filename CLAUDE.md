@@ -1,7 +1,8 @@
 # Sablja Reader — notes for Claude
 
-Windows/Linux desktop manga/webtoon reader written in Python (customtkinter + Tk). Current version: **1.4.7**
-(`config.py`, `APP_VERSION`). Repo: `sabljarevic0314/Sablja-Manga-Reader`.
+Windows desktop manga/webtoon reader written in Python with **Flet 1.1.2** (Flutter), the same toolkit
+as the owner's Sablja Fitness. Current version: **2.0.0** (`config.py`, `APP_VERSION`).
+Repo: `sabljarevic0314/Sablja-Manga-Reader`. Windows only (Linux was dropped in 2.0).
 
 **Read `AGENTS.md` before touching any source.** It holds the non-negotiable rules for sources
 (pagination, live testing, cheap cards, NSFW ordering, chapter picker, no MangaDex). This file is the map;
@@ -11,53 +12,63 @@ AGENTS.md is the law.
 
 | File | Role |
 |---|---|
-| `SabljaReader.py` | Entry point and the whole UI: `App(ctk.CTk)`, reader (webtoon strip mode, page mode), card grid, settings, updates, bug report. About 3,800 lines, 226 functions. |
-| `config.py` | Paths (`BASE`, `DATA`, `DB_FILE`), `APP_VERSION`, `REPO_URL`, `UPDATE_ASSET`. |
+| `main.py` | Entry point: starts the cache trim and `ft.run(ui.app.main)`. |
+| `ui/app.py` | Shell: nav rail, header, view switching, keys, PIN lock, tray + toasts, `quit()` (every exit saves `db.json` first; the window has `prevent_close`). |
+| `ui/core.py` | Theme, the UI pump (workers post to `sources.Q`, one `page.update()` per batch), cover/page image files. In Flet 1.x read button labels via `.content`, and never test `control.page` (it raises when unmounted): call `core.dirty()`. |
+| `ui/library.py`, `history.py`, `ratings.py`, `browse.py` (Sources/Search/Random), `details.py`, `reader.py`, `downloads_view.py`, `settings.py` | One module per view. |
+| `ui/updates.py`, `updater.py` | In-app updates: `updater.py` talks to GitHub and verifies the download (size + SHA-256); `ui/updates.py` is the dialog. Only the NSIS-installed copy installs itself. |
+| `ui/gifs.py`, `ui/gif_lines.py`, `assets/gifs/` | Rail GIFs (Goku, Luffy, Naruto, Ichigo): random GIF every 20 s, one line per switch in a small bubble, right-click → Disable, Settings → Look re-enables. Character = file name minus the trailing number. Bundled GIFs plus the user's `data\gifs\`. Prep new ones with `python tools/prep_gifs.py <gif or folder> --out assets/gifs`. |
+| `config.py` | Paths (`BASE` = exe folder, `DATA`, `DB_FILE`), defaults, `APP_VERSION`, `REPO_URL`, `UPDATE_ASSET`. |
 | `storage.py` | `db.json` load/save (`save_db` writes atomically via `.tmp` + `os.replace`), backups, update state. |
-| `sources.py` | `Source` class: HTTP with per-host pacing and 429 backoff, generic selector-based listing/details/chapters/pages, the `api:` adapters (`mangadex`, `webtoons`, `fanfox`, `mangahub`), thread pools (`NET_POOL`, `DETAIL_POOL`, `IMG_POOL`, `PAGE_POOL`), `load_img` / `THUMB_CACHE`, `rebuild_sources()`. |
-| `sources.json` | **The only file to edit to add or fix a source.** Hot-reloaded from the app (Settings → Reload sources.json). |
-| `downloads.py` | Chapter download to CBZ/folders. |
-| `desktop.py` | Tray icon + toasts (`pystray`, optional, only while notifications are on), PIN hashing, `norm_title` for grouping duplicates. |
-| `textures.py`, `assets.py` | Theme palettes, paper textures, embedded icons/images. |
+| `sources.py` | `Source` class: HTTP with per-host pacing and 429 backoff, generic selector-based listing/details/chapters/pages, the `api:` adapters (`webtoons`, `fanfox`, `mangahub`), thread pools, `bg()`, `rebuild_sources()`. |
+| `sources.json` | **The only file to edit to add or fix a source.** Hot-reloaded from Settings → Sources. |
+| `downloads.py` | Chapter download to CBZ. |
+| `desktop.py` | Tray icon + toasts (`pystray`, only while notifications are on), PIN hashing, `norm_title` for grouping duplicates. |
+| `stats.py` | Reading log (`DB["log"]`, one row per day): time, pages, chapters, series; streak, goals. |
+| `assets.py` | The app icon (`make_icon`, `make_icon_file`). |
 | `autoprobe.py` | `python autoprobe.py <listing-url>`: probes a site and suggests selectors for a new source. |
-| `build.ps1`, `SabljaReader.spec` | PyInstaller build to `dist\SabljaReader.exe`, copies `sources.json` into `dist\`. |
-| `installer\make_setup.ps1`, `installer\SabljaReader.nsi` | NSIS installer `dist\SabljaReader-Setup.exe`. Not refreshed by `build.ps1`. |
+| `build.ps1` | `flet pack` → `dist\SabljaReader.exe` (one file, GIFs inside) + `dist\sources.json`. Uses `.venv` if present. |
+| `installer\make_setup.ps1`, `installer\SabljaReader.nsi` | NSIS installer `dist\SabljaReader-Setup.exe`. Not refreshed by `build.ps1`. The installer closes the app (`taskkill /T`, then `/T /F`: the Flutter window is a child `flet.exe`). |
 | `.github\workflows\` | `ci.yml` (compile + JSON check on push), `release.yml` (tag → exe + installer on the release). |
-| `CHANGELOG.md`, `README.md` | Release notes and user docs. Update the changelog for user-visible changes. |
+| `Test Sablja Reader.bat` | Owner's launcher for testing from source with a copy of the installed library. |
+| `CHANGELOG.md`, `README.md`, `ROADMAP.md` | Release notes, user docs, ideas. Update the changelog for user-visible changes. |
 
-Runtime data lives in `data\` next to the exe (repo: `data\`, built app: `dist\data\`): `db.json`
-(library, progress, bookmarks, folders, ratings), `cache\` (images, capped at 1.5 GB), `errors.log`,
-`backups\`, `update.json`. **Never delete or rewrite `data\` as part of a fix.** The installer and
-updater promise to leave it alone.
+Runtime data lives in `data\` next to the exe (repo: `data\`, installed: `%LOCALAPPDATA%\Programs\SabljaReader\data`):
+`db.json` (library, progress, bookmarks, folders, ratings, log), `cache\` (images, capped at 1.5 GB), `gifs\`
+(the user's own GIFs), `errors.log`, `backups\`, `update.json`. **Never delete or rewrite `data\` as part of a
+fix.** The installer and updater promise to leave it alone. The packed exe unpacks its Flutter client to
+`%USERPROFILE%\.flet\client\flet-desktop-full-1.1.2-<hash>`; Flet removes old ones after 30 days unused.
 
 ## Running and verifying
 
-Run from source: `pip install -r requirements.txt` then `python SabljaReader.py`. `curl_cffi` is
-needed for Cloudflare-protected sources (MangaHub). A virtualenv is in `.venv\`.
+Run from source: `.venv\Scripts\python main.py` (or `Test Sablja Reader.bat`). `curl_cffi` is needed for
+Cloudflare-protected sources (MangaHub).
 
 Checks (same as CI):
 
 ```powershell
-python -m py_compile SabljaReader.py
+.venv\Scripts\python -m compileall -q main.py config.py storage.py sources.py downloads.py desktop.py stats.py updater.py ui
 python -c "import json; json.load(open('sources.json', encoding='utf-8'))"
 ```
 
 Live source test (from repo root):
 
 ```powershell
-$env:PYTHONPATH=(Get-Location).Path
-python -c "import SabljaReader as S; S.rebuild_sources(); print([s.name for s in S.SOURCES.values()])"
+.venv\Scripts\python -c "import sources as S; S.rebuild_sources(); print([s.name for s in S.SOURCES.values()])"
 ```
 
-Build (exe, then installer, in that order):
+Build (exe, then installer, in that order; needs `pip install pyinstaller flet-cli==1.1.2`):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
 ```
 
+When testing a built exe, copy it to a scratch folder first (it uses the `data\` next to it) and only ever
+stop that copy's processes by PID: killing `SabljaReader.exe` by name would also kill the owner's installed app.
+
 Releasing: bump `APP_VERSION` in `config.py`, add a `CHANGELOG.md` entry, commit, and push a version tag.
-The release workflow builds and attaches the installer.
+The release workflow builds and attaches the installer, which is what the in-app updater downloads.
 
 ## Sources: quick reference
 
@@ -69,7 +80,7 @@ The release workflow builds and attaches the installer.
   `page_urls`, `script_regex`, `url_suffix`). Optional: `request_delay`, `headers`, `impersonate`.
 - Known pagination shapes: MangaDoom `/popular-manga?page={page}`; ReadManga `/browse?page={page}`
   and `/browse/latest-manga?page={page}`; MangaTown `/hot/romance/{page}.htm` (page 1 is `1.htm`).
-- Cards are built only from listing HTML. No per-card requests. Covers go through `load_img`.
+- Cards are built only from listing HTML. No per-card requests.
 
 ## Open issues
 
@@ -87,13 +98,11 @@ The release workflow builds and attaches the installer.
 ## Conventions
 
 - Keep changes small and match the surrounding style, naming and comment density.
-- Card size is 212x300 (grid cell 236, `CARD_CELL` in `config.py`). Keep it. A card grid must stay under `GRID_MAX_PX` (X11 kills the app over 32767 px). Column count comes from the real canvas width.
-- Page appends use `grid_cards(..., append=True)`.
-- Don't add per-chapter widgets to the reader. The chapter picker is a Tk `Listbox` with a number-entry path.
-- The app runs on Windows and Linux. Keep platform branches behind `WIN` (`SabljaReader.py`). Use `open_path()`
-  rather than `os.startfile`, `bind_wheel()` rather than a bare `<MouseWheel>` bind (X11 sends Button-4/5),
-  `grab_when_mapped()` rather than `grab_set()`, and `UI_FONT` rather than a font name. Linux build:
-  `./build.sh`, then `dist/install-linux.sh`. The updater only installs on Windows (`running_installed()` needs `winreg`).
+- Workers never touch controls: post results to the UI loop (`sources.bg`, `core.post`) and call
+  `core.dirty()` / `app.pump.mark()` instead of `page.update()`.
+- Grids are `ft.GridView` with `max_extent` from `DENSITY` (S / M / L). Page appends add to the existing grid.
+- Don't add per-chapter widgets to the reader. The chapter picker is a lazy `ListView` with a number-entry path.
+- Mascots (sprites / Blender) were tried and removed; don't bring them back. The rail GIFs replaced them.
 
 ## Git identity
 

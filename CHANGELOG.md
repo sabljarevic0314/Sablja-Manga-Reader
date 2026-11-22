@@ -3,6 +3,53 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## 2.0.0 — 2026-11-22
+
+A new app from the ground up. Your library, progress, ratings, folders and downloads carry over: the
+installer updates the app in place and keeps the `data` folder as before (with a `db.json` backup).
+
+### Changed
+
+- **New interface built with Flet (Flutter)**: icon rail with labels, cards, Material 3 controls, dark
+  theme by default (White still available). It renders on the GPU, so scrolling and switching sections
+  are much faster.
+- **Library** is a compact grid that adapts to the window width (S / M / L cover size), with the title on
+  the cover, a `+N` badge for new chapters, a read-progress bar, a filter box and sorting (Recent, Title,
+  Rating, New).
+- **History** shows where you are (chapter and page), how many chapters you've read out of how many, the
+  total time spent on each series, your rating (click to rate), and a summary strip: total reading time,
+  last 7 days, chapters finished, streak.
+- **Reader:** webtoon pages load only around where you're reading, and the view no longer jumps when a
+  page above finishes loading. Paged modes show direction arrows (Next / Back on the correct side for
+  right-to-left) plus a hint when a chapter opens. New keys: H hides the bar, C opens the chapter list,
+  N / P next / previous chapter.
+- Images reach the screen as small cached files (covers are pre-shrunk), and every request still goes
+  through each source's pacing and 429 backoff, so faster browsing doesn't mean more blocking.
+- Closing the window always saves your place and `db.json` first. Updating closes the app cleanly too.
+
+### Added
+
+- **Anime GIFs** at the foot of the menu rail: Goku, Luffy, Naruto and Ichigo take turns (a new one every
+  20 seconds), and each says one of its 22 lines in a small speech bubble when it shows up. Right-click
+  → *Disable GIFs* turns them off; *Settings → Look* turns them back on. You can add your own GIFs
+  through *Settings → Look → Open GIF folder*.
+- **Right-click menu at the cursor** on every cover: open, continue, add/remove from Library, rate, move
+  to a folder, remove from a folder, open on another source, delete downloaded chapters.
+- **Downloads → On disk:** every downloaded series and chapter, deletable one by one or per series.
+- **Reader:** the mouse wheel turns pages in Single/Double mode (and moves on to the next chapter),
+  middle click starts browser-style autoscroll in webtoon mode (hold and drag works too), and the
+  scrollbar thumb can be dragged.
+- **Random** rolls six titles at once, with an optional source filter and the earlier rolls below.
+- **Sources** keeps loading pages until the window is full, and has a *Load more* button, a genre
+  filter where the source supports it, *Shuffle*, and the S / M / L cover size.
+- **Reading log:** reading time (only while you're active or auto-scrolling), pages and chapters per day,
+  plus lifetime time per series.
+
+### Removed
+
+- **Linux builds.** 2.0 is Windows only; the last Linux release is 1.4.7.
+- The old Tk interface, the mascot experiments and the *Today* screen.
+
 ## 1.4.7 — 2026-11-19
 
 ### Fixed

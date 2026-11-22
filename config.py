@@ -3,16 +3,8 @@
 import os
 import sys
 
-import shutil
-
-_EXE_DIR = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
-if os.environ.get("APPIMAGE"):
-    # An AppImage runs from a read-only mount, so data/ and sources.json live in the same per-user folder
-    # install-linux.sh uses. sources.json is refreshed from the bundled copy when the app version changes
-    # (the previous one is kept as sources.json.bak).
-    BASE = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "SabljaReader")
-else:
-    BASE = _EXE_DIR
+# The exe's folder (or the repo when run from source): data\ and sources.json live next to it.
+BASE = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
 DATA = os.path.join(BASE, "data")
 CACHE = os.path.join(DATA, "cache")
 DB_FILE = os.path.join(DATA, "db.json")
@@ -27,8 +19,6 @@ PAGE_SIZE = 32
 # Card sizes (logical px). Bigger covers = fewer widgets on screen = smoother scrolling.
 CARD_W, CARD_H = 212, 300
 SMALL_W, SMALL_H = 128, 181          # search-result cards
-CARD_CELL = CARD_W + 24              # card + frame margin + 2*6 grid padding
-SMALL_CELL = SMALL_W + 24
 MD_API = "https://api.mangadex.org"
 
 MODES = ["Webtoon (vertical)", "Single · left→right", "Single · right→left", "Double · left→right", "Double · right→left"]
@@ -38,30 +28,18 @@ PAPERS = ["Black", "White"]
 # reader auto-scroll presets in px/s (A starts/stops it, , and . or [ and ] change it)
 AUTO_SPEEDS = {"Slow": 70.0, "Medium": 140.0, "Fast": 260.0, "Very fast": 450.0}
 PANIC_KEYS = ["F12", "F9", "F8", "Pause"]      # hides the window at once
-NOTIFY_EVERY_MS = 30 * 60 * 1000               # background new-chapter check
-PAGE_BORDER = 5     # black contour drawn around a page in the paged modes
-PAGE_GAP = 16       # black gutter between the two halves of a double spread
 DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
             "dl_dir": os.path.join(BASE, "downloads"), "nsfw": True,
             "paged_guides": True, "paper": "Black", "autoscroll": "Medium", "panic_key": "F12",
             "notify_new": False, "group_dupes": True,
             "pin": "", "pin_on_start": True, "pin_on_hide": True,
-            "show_history": True, "start_fullscreen": True, "card_genres": True,
-            "update_auto": True}
+            "start_fullscreen": True,
+            "update_auto": True, "goal_chapters": 5, "goal_minutes": 30, "gifs": True,
+            "lib_sort": "Recent", "lib_size": "M", "last_source": "", "reader_zoom": 1.0,
+            "reader_bar": True}
 
-APP_VERSION = "1.4.7"
+APP_VERSION = "2.0.0"
 
-if BASE != _EXE_DIR:
-    _bundled, _mark = os.path.join(_EXE_DIR, "sources.json"), os.path.join(BASE, ".sources_version")
-    try:
-        _seen = open(_mark, encoding="utf-8").read().strip() if os.path.exists(_mark) else ""
-        if os.path.exists(_bundled) and (_seen != APP_VERSION or not os.path.exists(SRC_FILE)):
-            if os.path.exists(SRC_FILE):
-                shutil.copyfile(SRC_FILE, SRC_FILE + ".bak")
-            shutil.copyfile(_bundled, SRC_FILE)
-            open(_mark, "w", encoding="utf-8").write(APP_VERSION)
-    except OSError:
-        pass
 REPO_URL = "https://github.com/sabljarevic0314/Sablja-Manga-Reader"
 GITHUB_API = "https://api.github.com/repos/sabljarevic0314/Sablja-Manga-Reader/releases/latest"
 UPDATE_ASSET = "SabljaReader-Setup.exe"

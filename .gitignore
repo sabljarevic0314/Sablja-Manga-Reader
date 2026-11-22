@@ -2,9 +2,11 @@
 /build/
 /dist/
 *.spec.bak
+/SabljaReader.spec
 
 # ---- your library, progress, cache and downloads: never commit these ----
 /data/
+/downloads/
 /installer/tools/
 /installer/stage/
 /installer/*.sed

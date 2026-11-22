@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt pyinstaller flet-cli==1.1.2
 
       - name: Install NSIS
         continue-on-error: true
@@ -41,49 +41,3 @@ jobs:
         with:
           files: dist/SabljaReader-Setup.exe
           generate_release_notes: true
-
-  linux:
-    runs-on: ubuntu-22.04      # older glibc, so the binary runs on more distros
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-tk
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
-
-      - name: Build the app
-        run: ./build.sh
-
-      - name: Package
-        run: |
-          mkdir -p pkg/SabljaReader
-          cp dist/SabljaReader dist/sources.json dist/SabljaReader.png dist/install-linux.sh pkg/SabljaReader/
-          tar -C pkg -czf dist/SabljaReader-linux-x86_64.tar.gz SabljaReader
-
-      - name: Build the AppImage
-        run: |
-          mkdir -p AppDir/usr/bin
-          cp dist/SabljaReader dist/sources.json AppDir/usr/bin/
-          cp dist/SabljaReader.png AppDir/SabljaReader.png
-          printf '#!/bin/sh\nexec "$(dirname "$(readlink -f "$0")")/usr/bin/SabljaReader" "$@"\n' > AppDir/AppRun
-          chmod +x AppDir/AppRun
-          printf '[Desktop Entry]\nType=Application\nName=Sablja Reader\nComment=Manga, manhwa and webtoon reader\nExec=SabljaReader\nIcon=SabljaReader\nTerminal=false\nCategories=Graphics;Viewer;\nStartupWMClass=SabljaReader\n' > AppDir/SabljaReader.desktop
-          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x appimagetool
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir dist/SabljaReader-x86_64.AppImage
-
-      - name: Publish the GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/SabljaReader-linux-x86_64.tar.gz
-            dist/SabljaReader-x86_64.AppImage

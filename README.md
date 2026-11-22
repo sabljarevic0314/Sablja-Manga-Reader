@@ -1,325 +1,206 @@
 # Sablja Reader
 
-A desktop manga / manhwa / webtoon reader for Windows and Linux. Black UI with a
-*White* look in **Settings → Background**, webtoon (vertical strip),
-single, double and right-to-left paged reading, a library with folders and bookmarks, downloads,
-a History section and progress tracking — plus a built-in random manga roll (Randomizer).
+A desktop manga / manhwa / webtoon reader for Windows. Dark by default (with a *White* theme),
+webtoon (vertical strip), single, double and right-to-left paged reading, a library with folders,
+ratings, history and reading stats, chapter downloads, and a random roll when you don't know what
+to read next.
 
 **It hosts no content.** Sablja Reader is only a client application. It does not host, store,
-upload or distribute any manga, and it ships with no copyrighted material. It reads pages from
-the sources you enable in `sources.json`, using the official API where one exists (for example
-WEBTOON). Which sources you enable, and what you read or download from them, is
-your decision and your responsibility — see [Legal notice](#legal-notice).
+upload or distribute any manga. It reads pages from the sources you enable in `sources.json`, using
+the official API where one exists (for example WEBTOON). Which sources you enable, and what you read
+or download from them, is your decision and your responsibility — see [Legal notice](#legal-notice).
 
 ---
 
-## Installing (regular users) — 2 minutes
+## Installing — 2 minutes
 
 > **No programming, no Python, no admin rights.** You need exactly one file: `SabljaReader-Setup.exe`.
 
 1. Go to the [Releases](../../releases) page.
 2. Open the newest release and under **Assets** download **`SabljaReader-Setup.exe`**.
-   *(Ignore the "Source code (zip)" entries — that is only for developers, see below.)*
-3. Double-click the downloaded file. Windows may ask *"Do you want to run this file?"* — click **Run**.
-   If SmartScreen shows *"Windows protected your PC"* (the app is not code-signed), click
-   **More info → Run anyway**.
-4. The installer finishes by launching the app. A **Desktop** shortcut and a Start Menu entry
-   are created; the app also appears in **Apps & features** like any normal program.
+   *(Ignore the "Source code" entries — those are only for developers.)*
+3. Double-click it. If SmartScreen shows *"Windows protected your PC"* (the app is not code-signed),
+   click **More info → Run anyway**.
+4. The installer finishes by starting the app. It adds a Desktop shortcut, a Start Menu entry and an
+   uninstaller (**Apps & features**).
 
-What the installer does for you:
+What the installer does:
 
-* per-user install into `%LOCALAPPDATA%\Programs\SabljaReader` — **no admin rights needed**
-* creates Desktop and Start Menu shortcuts and a proper uninstaller
-* library, reading progress, cache and downloads live in `<install folder>\data`
-* that `data\` folder **survives both updates and uninstalling**, so you never lose your
-  bookmarks, progress or downloaded chapters by accident
+* installs per user into `%LOCALAPPDATA%\Programs\SabljaReader` — **no admin rights needed**
+* keeps your library, progress, cache and downloads in `<install folder>\data`
+* never deletes that `data` folder, not on updates and not on uninstall, and backs up `db.json`
+  before every install
 
-Updating later: download the new `SabljaReader-Setup.exe` from the newest Release and run it —
-it refreshes the app files and keeps everything in `data\`.
+### Updating
 
-You can also let the app check for you: **Settings → Updates → Check for updates**. When a newer
-release exists you can read its notes and press **Download & install**. Automatic checks run at
-most once a day (and can be switched off). Before an update is installed, `db.json` is copied to
-`data\backups\`, so a bad update can never take your bookmarks with it. The installer makes its
-own `db-before-<version>.json` backup for manual installs too.
+The app checks GitHub for a new version once a day (switch it off in **Settings → Updates**, or press
+**Check for updates** there). When there is one you can read what changed and press
+**Download & install**: the app downloads the installer, checks its SHA-256 against the release, backs
+up `db.json` to `data\backups\`, closes and runs the update. Your library stays where it is.
+Downloading the newest `SabljaReader-Setup.exe` by hand and running it does the same.
 
----
-
-## Running from source (only for developers)
-
-Only do this if you want to read or modify the code — otherwise use the installer above.
-
-You need **Python 3.13 or newer** and a few packages:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python SabljaReader.py
-```
-
-If PowerShell says *"running scripts is disabled on this system"*, allow local scripts for your
-user once and try again:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-`curl_cffi` (a browser-compatible HTTP client) is included in `requirements.txt` as an optional
-extra; the app also runs without it. `lxml` is in there too: BeautifulSoup uses it as the fast
-HTML parser and silently falls back to Python's built-in `html.parser` if it is missing.
-
-A source checkout keeps its **own** `data\` folder next to `SabljaReader.py`. That folder is
-separate from an installed copy's `%LOCALAPPDATA%\Programs\SabljaReader\data`, so copy `db.json`
-between them if you want both copies to share the same library.
-
----
-
-## Linux
-
-Sablja Reader runs on Linux too (X11 or Wayland via XWayland). Two ways to get it:
-
-**AppImage (easiest).** Download `SabljaReader-x86_64.AppImage` from the newest [Release](../../releases),
-right-click it > **Properties** > **Permissions** > tick **Is executable**, then double-click. Nothing is
-installed; your library is kept in `~/.local/share/SabljaReader`.
-
-**Release build.** Download `SabljaReader-linux-x86_64.tar.gz` from the newest
-[Release](../../releases), unpack it, and run `./install-linux.sh` inside the folder. It installs
-per-user into `~/.local/share/SabljaReader` (no root) and adds **Sablja Reader** to your app menu.
-Your library lives in `~/.local/share/SabljaReader/data` and, like on Windows, survives updates
-and `./install-linux.sh --uninstall`. To update, unpack the new release and run the script again.
-
-**From source.** You need Python 3.13+ with Tk, which most distros ship as a separate package:
-
-```bash
-sudo dnf install python3-tkinter      # Fedora
-sudo apt install python3-tk python3-venv   # Debian / Ubuntu
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python SabljaReader.py
-```
-
-To build your own binary instead, run `pip install pyinstaller` and then `./build.sh`. That writes
-`dist/SabljaReader`; then run `dist/install-linux.sh`.
-
-What's different from Windows:
-
-* **Updates** only open the release page. There is no auto-installer on Linux.
-* **Fullscreen** (F11) uses the window manager's fullscreen. The app's own window bar stays visible.
-* **Notifications / tray icon** need a tray. On GNOME that means the *AppIndicator* extension. Without
-  one the app still runs, just with no tray icon or toasts.
-* The UI font is Noto Sans. If it's missing, your system's default sans font is used.
-
----
-
-## Building your own exe (optional, for developers)
-
-```powershell
-pip install pyinstaller
-.\build.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
-```
-
-`build.ps1` produces a single-file `dist\SabljaReader.exe` (with the app icon baked in) and copies
-`sources.json` next to it. `make_setup.ps1` wraps that into `dist\SabljaReader-Setup.exe` (it
-downloads a portable NSIS if `makensis` is not already installed).
-Your library, progress and cache in `dist\data` are left untouched.
-
-### Releasing on GitHub
-
-The workflow in `.github/workflows/release.yml` builds both files on a Windows runner and attaches
-`SabljaReader-Setup.exe` to the release. Bump `APP_VERSION` in `config.py` (the setup script
-reads it automatically), then push a version tag:
-
-```powershell
-git tag 1.4.1
-git push origin 1.4.1
-```
-
-`v1.4.1` works too. The built-in updater compares the release tag with `APP_VERSION`, so keep the
-tag and the app version in sync (`1.4` and `1.4.0` compare as the same version).
+Coming from 1.x? Just install 2.0 over it (or let 1.x update itself). Everything in `data\` carries over.
 
 ---
 
 ## Using the app
 
-### Library & reading
+### Library
 
-The left sidebar is your library — titles you have bookmarked, with folders and progress tracking.
-Open a chapter and read; your position is remembered per title.
+Everything you've added, as a grid of covers. Folders are chips along the top (plus *Downloaded*),
+and you can filter by title, sort (Recent, Title, Rating, New) and pick the cover size (S / M / L).
+A `+N` badge marks series with new chapters, and a thin bar shows how far you've read. Right-click any
+cover for: open, continue, add/remove, rate, move to a folder, open on another source, delete downloads.
 
-The window opens in borderless fullscreen by default. Press **F11** to toggle it, or turn
-*Settings → Window → Open in borderless fullscreen on start* off if you prefer a normal window.
-The custom minimize / fullscreen / close buttons appear only while the native title bar is hidden,
-so there are never two sets of controls.
+If the same series is in your library from several sources it shows as one card; right-click it to
+open it on a specific source. Turn that off in **Settings → Look**.
 
-### Reading modes
+### Finding something to read
 
-Switch in Settings or per title in the details page:
+* **Sources** — browse one source at a time (popular / latest, genre filter where the source has one,
+  *Shuffle* for a random page, *Load more*).
+* **Search** — searches every enabled source at once.
+* **Random** — rolls six random titles, optionally from one source, with your earlier rolls below.
+
+### Reading
+
+Modes (default in **Settings → Reading**, or per series in the reader):
 
 | Mode | Use |
 | --- | --- |
-| Webtoon (vertical) | long vertical strips; pages are laid out as one continuous canvas |
-| Single · left→right / right→left | classic page-by-page |
+| Webtoon (vertical) | long vertical strips, one continuous scroll |
+| Single · left→right / right→left | page by page |
 | Double · left→right / right→left | two-page spreads |
 
-**Middle-click auto-scroll:** middle-click anywhere to start scrolling, without holding or
-dragging. Click in the lower half to scroll down, the upper half to scroll up; the further
-the pointer sits from the middle of the view, the faster it goes, and moving back towards the
-middle slows it down smoothly. Middle-click again (or press **Esc**, scroll the wheel, or
-click normally) to stop. This is especially handy for long webtoon chapters.
+Keys: **↑ ↓ Space** scroll · **← →** chapters (webtoon) or pages (paged) · **N / P** next / previous
+chapter · **C** chapter list · **+ / −** zoom · **H** hide the bar · **Esc** back · **F11** full screen.
 
-**Hotkey auto-scroll (webtoon mode):** press **A** to scroll at a steady speed and **A** again (or
-any other key, the wheel or a click) to stop. **,** and **.** (or **[** and **]**) step through the
-presets *Slow, Medium, Fast, Very fast*; the default lives in *Settings > Reading*. It stops by itself
-at the end of the chapter.
+* **Auto-scroll (webtoon):** **A** starts and stops it, **,** and **.** change the speed.
+* **Middle click** starts browser-style auto-scroll; hold and drag works too.
+* The mouse wheel turns pages in the paged modes and moves on to the next chapter at the end.
 
-The reader follows the app's background (*Settings > Background*): **Black** or **White**.
+Your place is saved as you read, and always when you close the window.
 
-### New-chapter notifications (optional)
+### History, ratings and stats
 
-The Library shows a badge on covers with unread chapters, plus a count next to *Library* in the sidebar.
-Switch on *Settings > Notifications* to also get a Windows toast when a favourite gets new chapters:
-the app then checks every 30 minutes **while it is open** and shows a tray icon for the toasts. It is off
-by default, closing the window always quits the app, and nothing runs in the background or starts with
-Windows. Series are compared against the chapter count the app last saw, so nothing is announced the
-first time it sees a series. Needs the optional `pystray` package (bundled in the exe).
-
-### Privacy: panic key and PIN
-
-**F12** (changeable) or the **Hide** button in the top bar hides the window at once (it minimizes,
-or leaves the taskbar when the notification tray icon is on). An optional **PIN** (*Settings > Privacy*)
-then covers the app until it is entered; five wrong tries in a row wait 30 seconds, and toasts never
-show titles while locked. The PIN only hides the window: it does not encrypt your library or downloads.
-
-### Same series from several sources
-
-If the same title is in your library from different sources, the Library shows one card (marked
-*N sources*) led by the copy you read last. Right-click it for *Open on…* a specific source, or
-*Show each source separately*. Nothing is merged in `db.json`; progress stays per source. Turn it off in
-*Settings > Library*.
-
-### Shuffle (inside a source)
-
-Every source page has a **Shuffle** button. It mixes the cards already loaded with a random
-listing page (where the source has pagination) and shows a fresh random selection; press it
-again for a different set. Scroll to the bottom to keep loading the normal listing.
-
-### Genres on cards
-
-Cards show a short genre/category line when the source exposes one directly on the
-listing card (WEBTOON, MangaHub, Zazamanga, ReadManga, MangaTown, FanFox's latest list), or when the
-genres were already cached from opening that title's details page. Cards never trigger
-extra page requests, so scrolling stays fast and sites are not hammered.
-Turn this off in *Settings > Sources > Show genres on cards*.
-
-### Randomizer
-
-The **Randomizer** in the sidebar opens a random title from your enabled sources on the normal
-details page, so you can read, bookmark, rate or download it. *Next random* rolls again,
-*Previous* steps back through the ones you've seen — an easy way to find something new
-without searching.
-
-### History
-
-The **History** section lists everything you have read, newest first, with the chapter and page you
-stopped on — click a card to jump straight back in, right-click to remove a single entry, or use
-*Clear history* for all of it. Don't want it in the sidebar? Turn it off in *Settings → Sidebar*
-(*Show the History section*); your reading positions are kept either way.
-
-### Reporting a bug
-
-*Settings → Report a bug / request a feature* has a short form (type, summary, what happened).
-**Open GitHub issue** opens a new issue in your browser with the text and a diagnostics block
-already filled in; you review it and press Submit. Nothing is sent automatically, and the
-diagnostics contain no library, history or reading data. **Copy diagnostics** puts the same
-block on your clipboard if you would rather paste it somewhere else.
+**History** lists everything you've read with the chapter and page you stopped on, how many chapters
+you've finished, and the time you spent on each series, plus totals (reading time, last 7 days,
+chapters, streak). Reading time only counts while you're actually reading. **Rating** lists the series
+you rated, with your notes.
 
 ### Downloads
 
-Chapters can be saved for personal offline reading from the details page (with a configurable delay
-between page fetches, to keep the load on the source low); downloaded chapters live in
-`<install folder>\data\downloads`. Downloads are for your own personal use only — do not
-redistribute them.
+Save chapters for offline reading from a series' page. They download one at a time with a pause
+between pages (set it in **Settings → Downloads**) so the source isn't hammered, and are stored as one
+`.cbz` per chapter. **Downloads → On disk** lists everything you have and deletes it per chapter or per
+series. Downloads are for your own personal use only — don't redistribute them.
+
+### New-chapter notifications (optional)
+
+The Library always shows the `+N` badge. Turn on **Settings → Notifications** to also get a Windows
+toast when a Library series gets new chapters: the app checks every 30 minutes **while it is open**
+and shows a tray icon for the toasts. Off by default; closing the window still quits the app and
+nothing starts with Windows. A series is only announced once the app has seen its chapter count
+before, so turning this on never floods you with old chapters.
+
+### Privacy: panic key and PIN
+
+**F12** (changeable) hides the window at once. An optional **PIN** (**Settings → Privacy**) locks the
+app when it starts and/or after the panic key; toasts never show titles while it's locked. The PIN
+only hides the window — it does not encrypt your library or downloads.
+
+### The GIFs
+
+Goku, Luffy, Naruto and Ichigo take turns at the bottom of the menu, a new one every 20 seconds, and
+each says something when it shows up. Right-click it → **Disable GIFs** to turn them off;
+**Settings → Look** turns them back on. To add your own, open the GIF folder from there and drop in
+transparent `.gif` files named like `luffy3.gif`.
+
+### Reporting a bug
+
+**Settings → Report a bug / request a feature** opens a new GitHub issue in your browser with your
+text and a short diagnostics block (app version, Windows version, settings that matter) filled in.
+You review it and press Submit; nothing is sent automatically and no reading history is included.
 
 ---
 
 ## Sources
 
-`sources.json` is the one file to edit — a source is described by its listing/search/details/chapter
-selectors (or `api: webtoons` / `api: fanfox` for sources that need a custom
-adapter). Regular sources keep their file order in the app; every 18+ source is forced to the
-bottom (both in `sources.json` and by `rebuild_sources()`). The app hot-reloads it
-(*Settings → Reload sources.json*).
+`sources.json` (next to the exe) is the one file to edit. A source is described by its
+listing / search / details / chapter / page selectors, or by an `api:` adapter for sites that need
+custom handling (`webtoons`, `fanfox`, `mangahub`). Regular sources keep their file order; every 18+
+source is always listed last. **Settings → Sources** shows or hides each one and reloads the file
+without restarting.
 
-The file ships with worked examples: an official API (WEBTOON) and selector-based
-sources including **MangaHub**, **FanFox**, **MangaDoom**, **ReadManga** and **MangaTown**. FanFox
-hides chapter pages behind a packed-JS
-AJAX endpoint, so its `api: fanfox` adapter asks for each page and unpacks the response.
-Keep `curl_cffi` installed so sites that check the TLS fingerprint (such as MangaHub) can be
-read with a browser-like connection. A source can also set `request_delay` (seconds between
-page requests); HTTP 429 responses honour `Retry-After` and back off automatically. Sources
-change their HTML regularly; if one stops working, the selectors in `sources.json` are the
-first place to look.
+The bundled list includes WEBTOON (official API) and selector-based sources such as **MangaHub**,
+**FanFox**, **MangaDoom**, **ReadManga** and **MangaTown**. Requests are paced per site, and HTTP 429
+responses honour `Retry-After`. `curl_cffi` (bundled) gives a browser-like connection for sites that
+check it, such as MangaHub. Sites change their HTML regularly; if one stops working, its selectors in
+`sources.json` are the first place to look. MangaDex is not bundled (mixed languages, broken entries).
 
-MangaHub paginates its listing. Its `api: mangahub` adapter reads the full chapter list and every page
-of a chapter from the site's own API (the chapter HTML only carries the first few images).
-MangaTown and MangaDoom also paginate their listings and expose their full chapter archives.
-MangaTown spreads a chapter
-across one URL per page, so its `page_urls` selector reads the page list and fetches those
-pages in parallel. Page downloads retry automatically before a failed page is shown.
-MangaDex is no longer bundled: its catalogue mixed languages and produced empty or broken
-entries, so it was removed from the source list.
+Adding a source from scratch? `python autoprobe.py <listing-url>` probes a page and writes
+`autoprobe_<host>.txt` with the selectors it found. Only use it on sites you are allowed to access.
 
-A source can define a top-level `tags` selector list for the details page. Listing blocks can
-also set their own `tags` selectors when the cards themselves show genres. The first selector
-that finds text wins, and the result is shown on the card and details page. If a listing emits
-broken local cover paths but the site has a working CDN copy, `cover_rewrite` (a list of
-`[regex, replacement]` pairs) fixes the card URL without an extra request.
-
-**Sablja Reader does not endorse, operate or recommend any particular source.** Some bundled
-sources are examples that scrape a public website; others use official APIs. If you add or use
-a source, you are responsible for making sure you are allowed to access and read it: check the
-site's terms of service and the copyright status of what it offers, and prefer sources that are
-published with the rights holders' permission. Please keep your request rate low and respect
-`robots.txt` and any access restrictions a site applies.
-
-Adding a source from scratch? `autoprobe.py` does a one-shot probe of a listing page and writes
-`autoprobe_<host>.txt` with the card / chapter / page selectors it detected - paste the URL as an
-argument or run it empty and type it in. Only use it on sites you are permitted to access.
-
-Download-only sites (for example comic DDL blogs that link to `.cbz`/`.cbr` files on file
-hosts) do not fit this reader model: they have no page images to page through and no chapter
-viewer. They would need a separate download/queue subsystem, and their content is usually not
-licensed — so they are not supported.
+**Sablja Reader does not endorse, operate or recommend any particular source.** If you add or use a
+source, you are responsible for making sure you are allowed to read it: check the site's terms and the
+copyright status of what it offers, prefer sources published with the rights holders' permission, keep
+your request rate low and respect `robots.txt`.
 
 ---
 
-## Notes
+## For developers
 
-* Windows 10/11, 64-bit.
-* Memory: only pages near the viewport are held in memory; tall strips are capped in resolution
-  (`WT_MAX_PX`) so a long chapter cannot grow without bound.
-* Webtoon pages show a page-box outline only while a page is loading or failed; once artwork is on
-  the canvas the outline is hidden, so long strips butt together seamlessly (no stray hairlines).
+### Running from source
+
+You need **Python 3.13+**:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python main.py
+```
+
+Or double-click **`Test Sablja Reader.bat`**: it sets up `.venv` the first time and can start you off
+with a copy of your installed library (the installed one is never changed). A source checkout keeps
+its own `data\` folder in the repo.
+
+### Building the exe and installer
+
+```powershell
+pip install pyinstaller flet-cli==1.1.2
+.\build.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
+```
+
+`build.ps1` runs `flet pack` and writes a single-file `dist\SabljaReader.exe` (with the GIFs inside) plus
+`dist\sources.json`. `make_setup.ps1` wraps them into `dist\SabljaReader-Setup.exe` with NSIS (it
+downloads a portable NSIS if `makensis` isn't installed).
+
+### Releasing
+
+Bump `APP_VERSION` in `config.py`, add a `CHANGELOG.md` entry, commit, and push a matching tag
+(`git tag 2.0.1` then `git push origin 2.0.1`). `.github/workflows/release.yml` builds the installer on
+a Windows runner and attaches it to the release, which is what the in-app updater downloads.
 
 ---
 
 ## Legal notice
 
-* Sablja Reader is an independent hobby project. It is not affiliated with, endorsed by or
-  sponsored by any manga publisher, scanlation group, website or API provider mentioned or used
-  by it. All trademarks and content belong to their respective owners.
+* Sablja Reader is an independent hobby project. It is not affiliated with, endorsed by or sponsored by
+  any manga publisher, scanlation group, website or API provider. All trademarks and content belong to
+  their respective owners.
+* The rail GIFs are fan-made animations of characters from *Dragon Ball*, *One Piece*, *Naruto* and
+  *Bleach*, included for fun in a free, non-commercial app. The characters belong to their creators and
+  publishers. The lines they say are original to this app.
 * The software is provided **"as is"**, without warranty of any kind. You use it at your own risk.
-* You are solely responsible for the sources you enable and the content you view or download,
-  and for complying with the laws of your country and the terms of the sites you visit.
-* If you are a rights holder and believe this repository or its release files infringe your
-  rights, please open an issue on this repository or contact the owner through their GitHub
-  profile, and the matter will be looked at promptly.
+* You are solely responsible for the sources you enable and the content you view or download, and for
+  complying with the laws of your country and the terms of the sites you visit.
+* If you are a rights holder and believe this repository or its release files infringe your rights,
+  please open an issue on this repository or contact the owner through their GitHub profile, and it
+  will be looked at promptly.
 
 ## License
 
-Proprietary — all rights reserved. Free to install and use for personal, non-commercial
-purposes; selling, redistributing or republishing the app (or its source) is not allowed.
-See [LICENSE](LICENSE).
+Proprietary — all rights reserved. Free to install and use for personal, non-commercial purposes;
+selling, redistributing or republishing the app (or its source) is not allowed. See [LICENSE](LICENSE).
