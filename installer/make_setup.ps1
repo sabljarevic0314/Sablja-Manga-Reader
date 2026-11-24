@@ -1,4 +1,4 @@
-# Build dist\SabljaReader-Setup.exe - a normal Windows installer (NSIS).
+# Build dist\SabljaMangaReaderApp-Setup.exe - a normal Windows installer (NSIS).
 # Uses makensis if it is on PATH, otherwise downloads the portable NSIS into installer\tools.
 #
 #   powershell -ExecutionPolicy Bypass -File installer\make_setup.ps1
@@ -7,8 +7,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
-$exe  = Join-Path $root "dist\SabljaReader.exe"
-if (-not (Test-Path $exe)) { throw "dist\SabljaReader.exe not found - run .\build.ps1 first." }
+$exe  = Join-Path $root "dist\SabljaMangaReaderApp.exe"
+if (-not (Test-Path $exe)) { throw "dist\SabljaMangaReaderApp.exe not found - run .\build.ps1 first." }
 if (-not (Test-Path (Join-Path $root "dist\sources.json"))) {
     Copy-Item (Join-Path $root "sources.json") (Join-Path $root "dist\sources.json") -Force
 }
@@ -60,11 +60,11 @@ try {
         throw "Could not read APP_VERSION from config.py"
     }
     Write-Host "App version: $appVersion"
-    & $mk "/V2" "/DAPP_VERSION=$appVersion" "SabljaReader.nsi"
+    & $mk "/V2" "/DAPP_VERSION=$appVersion" "SabljaMangaReaderApp.nsi"
     if ($LASTEXITCODE -ne 0) { throw "makensis failed (exit $LASTEXITCODE)" }
 } finally { Pop-Location }
 
-$out = Join-Path $root "dist\SabljaReader-Setup.exe"
+$out = Join-Path $root "dist\SabljaMangaReaderApp-Setup.exe"
 if (-not (Test-Path $out)) { throw "installer was not produced" }
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green

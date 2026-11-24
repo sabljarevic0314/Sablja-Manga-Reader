@@ -124,7 +124,7 @@ class Updates:
         page.show_dialog(ft.AlertDialog(
             title=ft.Text("Install update"),
             content=ft.Text(f"Download version {tag} and run the installer now?\n\nYour library and progress stay "
-                            f"in {DATA}, and db.json is backed up first. Sablja Reader closes while the "
+                            f"in {DATA}, and db.json is backed up first. Sablja Manga Reader App closes while the "
                             "installer runs."),
             actions=[ft.TextButton("Cancel", on_click=lambda e: page.pop_dialog()),
                      ft.FilledButton("Install", on_click=go)]))
@@ -137,7 +137,7 @@ class Updates:
         backup_db()
         try:
             # Started through a short-lived cmd so the installer isn't in this app's process tree:
-            # it tree-kills SabljaReader.exe (/T) and must never take itself down with it.
+            # it tree-kills SabljaMangaReaderApp.exe (/T) and must never take itself down with it.
             subprocess.Popen(["cmd", "/c", "start", "", path], creationflags=subprocess.CREATE_NO_WINDOW)
         except Exception as ex:
             log_error("start installer", ex)

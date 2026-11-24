@@ -3,7 +3,7 @@ rem Double-click to test the current source code (not the installed app).
 rem Your installed library is only ever COPIED, never changed.
 setlocal
 cd /d "%~dp0"
-title Sablja Reader - test from source
+title Sablja Manga Reader App - test from source
 
 if not exist ".venv\Scripts\python.exe" (
     echo Setting up Python for the first time, this takes a minute...
@@ -27,7 +27,7 @@ echo Copied. Your real library stays untouched.
 
 :run
 ".venv\Scripts\python.exe" -c "import flet" 2>nul || ".venv\Scripts\python.exe" -m pip install -q -r requirements.txt
-echo Starting Sablja Reader (new interface)...
+echo Starting Sablja Manga Reader App (new interface)...
 ".venv\Scripts\python.exe" main.py
 if errorlevel 1 (
     echo.

@@ -9,7 +9,7 @@ from sources import SOURCES, bg, source_hidden
 from storage import S
 
 from .core import cover_image, muted, setv
-from .library import DENSITY, manga_tile
+from .library import DENSITY, fill_cover, manga_tile
 
 
 def enabled_sources(search=False):
@@ -266,37 +266,37 @@ class SearchView:
         self.app.views["Sources"].select(sid, q)
 
 
-COLS = {"xs": 6, "sm": 4, "lg": 2}
 
 
 class RandomView:
-    """Six random titles at once from your enabled sources: big cards, re-roll, earlier rolls below."""
+    """Four random titles at once from your enabled sources: a 2x2 grid of rectangles that fills the window, re-roll, earlier rolls below."""
     TITLE = "Random"
-    N = 6
+    N = 4
 
     def __init__(self, app):
         self.app = app
         self.seen = set()
         self.history = []
+        self.slots = []
         self.gen = 0
         self.only = ""                     # "" = every enabled source
         self.src_pick = ft.Dropdown(dense=True, width=220, value="", on_select=lambda e: self._only(e.control.value))
         self.roll_btn = ft.FilledButton("Roll again", icon=ft.Icons.CASINO, on_click=lambda e: self.roll())
-        self.grid = ft.ResponsiveRow(spacing=14, run_spacing=14)          # 6 across wide, 3 / 2 when narrower
+        self.grid = ft.Column(spacing=14, expand=True)        # two rows of two, fills the window
         self.trail = ft.Row([], spacing=8, scroll=ft.ScrollMode.AUTO)
         self.trail_box = ft.Container(ft.Column([muted("Earlier rolls", 12), self.trail], spacing=6, tight=True),
                                       padding=ft.Padding.only(left=16, right=16, bottom=12), visible=False)
         bar = ft.Row([self.src_pick, ft.Container(expand=True), self.roll_btn],
                      vertical_alignment=ft.CrossAxisAlignment.CENTER)
         self.control = ft.Column([ft.Container(bar, padding=ft.Padding.only(left=16, right=16, bottom=10)),
-                                  ft.Container(ft.Column([self.grid], scroll=ft.ScrollMode.AUTO), expand=True,
+                                  ft.Container(self.grid, expand=True,
                                                padding=ft.Padding.only(left=16, right=16, bottom=10)),
                                   self.trail_box], spacing=0, expand=True)
 
     def show(self):
         srcs = enabled_sources()
         self.src_pick.options = [ft.DropdownOption(key="", text="All enabled sources")] +             [ft.DropdownOption(key=x.id, text=x.name) for x in srcs]
-        if not self.grid.controls:
+        if not self.slots:
             self.roll()
 
     def _only(self, v):
@@ -307,16 +307,17 @@ class RandomView:
         return ft.Container(ft.Column([ft.ProgressRing(width=28, height=28), muted("Rolling…", 12)],
                                       horizontal_alignment=ft.CrossAxisAlignment.CENTER, tight=True, spacing=8),
                             alignment=ft.Alignment(0, 0), border_radius=16, bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
-                            col=COLS, aspect_ratio=0.56)
+                            expand=1)
 
     def roll(self):
         self.gen += 1
         gen = self.gen
-        for c in self.grid.controls:
+        for c in self.slots:
             m = getattr(c, "data", None)
             if m and m not in self.history:
                 self.history.insert(0, m)
-        self.grid.controls = [self.slot() for _ in range(self.N)]
+        self.slots = [self.slot() for _ in range(self.N)]
+        self.lay()
         self.render_trail()
         only = self.only
         for k in range(self.N):
@@ -327,37 +328,49 @@ class RandomView:
         if gen != self.gen:
             return
         if e or not r:
-            self.grid.controls[k] = ft.Container(ft.Column([ft.Icon(ft.Icons.CASINO_OUTLINED, size=30),
+            self.slots[k] = ft.Container(ft.Column([ft.Icon(ft.Icons.CASINO_OUTLINED, size=30),
                                                             muted("No luck on this one", 12)],
                                                            horizontal_alignment=ft.CrossAxisAlignment.CENTER, tight=True),
                                                  alignment=ft.Alignment(0, 0), border_radius=16,
-                                                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOW, col=COLS, aspect_ratio=0.56)
+                                                 bgcolor=ft.Colors.SURFACE_CONTAINER_LOW, expand=1)
             return
         self.seen.add(r["url"])
-        self.grid.controls[k] = self.card(r)
+        self.slots[k] = self.card(r)
+        self.lay()
+
+    def lay(self):
+        """Put the four slots in a 2x2 grid; each quarter takes an equal share of the window."""
+        s = self.slots
+        self.grid.controls = [ft.Row(s[i:i + 2], spacing=14, expand=1, vertical_alignment=ft.CrossAxisAlignment.STRETCH)
+                              for i in range(0, len(s), 2)]
 
     def card(self, m):
+        """Rectangle: the cover fills its height on the left, title / source / genres / actions on the right."""
         src = SOURCES.get(m["source"])
-        genres = ", ".join((m.get("genres") or [])[:3])
         in_lib = self.app.find_bm(m) is not None
-        bm = ft.IconButton(ft.Icons.BOOKMARK if in_lib else ft.Icons.BOOKMARK_ADD_OUTLINED, tooltip="Add to Library",
-                           icon_color="#ffffff", bgcolor="#66000000")
+        bm = ft.IconButton(ft.Icons.BOOKMARK if in_lib else ft.Icons.BOOKMARK_ADD_OUTLINED, tooltip="Add to Library")
 
         def save(e):
             on = self.app.toggle_bm(m)
             bm.icon = ft.Icons.BOOKMARK if on else ft.Icons.BOOKMARK_ADD_OUTLINED
             self.app.pump.mark()
         bm.on_click = save
-        c = ft.Container(ft.Column([
-            ft.Stack([manga_tile(m, self.app.open_manga, lambda m, pos=None: self.app.manga_menu(m, pos=pos)),
-                      ft.Container(bm, right=4, top=4)], expand=True),
-            ft.Container(ft.Column([ft.Text(m["title"], size=13, weight=ft.FontWeight.BOLD, max_lines=2,
-                                            overflow=ft.TextOverflow.ELLIPSIS),
-                                    muted(src.name if src else m["source"], 11),
-                                    *( [muted(genres, 11, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)] if genres else [])],
-                                   spacing=1, tight=True), padding=ft.Padding.only(left=4, right=4, bottom=4))],
-            spacing=6), data=m, col=COLS, aspect_ratio=0.56)
-        return c
+        chips = [ft.Container(ft.Text(g, size=12), bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH, border_radius=10,
+                              padding=ft.Padding.symmetric(horizontal=10, vertical=4)) for g in (m.get("genres") or [])[:5]]
+        cover = ft.GestureDetector(
+            ft.Container(fill_cover(m), aspect_ratio=0.69, border_radius=12, clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                         ink=True, on_click=lambda e: self.app.open_manga(m)),
+            on_secondary_tap_down=lambda e: self.app.manga_menu(m, pos=None), mouse_cursor=ft.MouseCursor.CLICK)
+        info = ft.Column([
+            ft.Text(m["title"], size=22, weight=ft.FontWeight.BOLD, max_lines=4, overflow=ft.TextOverflow.ELLIPSIS),
+            muted(src.name if src else m["source"], 14),
+            ft.Row(chips, spacing=6, run_spacing=6, wrap=True),
+            ft.Container(expand=True),
+            ft.Row([ft.FilledButton("Open", icon=ft.Icons.AUTO_STORIES, on_click=lambda e: self.app.open_manga(m)),
+                    bm], spacing=6)],
+            spacing=8, expand=True)
+        return ft.Container(ft.Row([cover, info], spacing=18, vertical_alignment=ft.CrossAxisAlignment.STRETCH),
+                            data=m, expand=1, padding=16, border_radius=16, bgcolor=ft.Colors.SURFACE_CONTAINER_LOW)
 
     def render_trail(self):
         self.trail.controls = [ft.Container(cover_image(m, 56, 80, 8), on_click=lambda e, m=m: self.app.open_manga(m),

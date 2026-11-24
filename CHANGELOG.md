@@ -3,6 +3,17 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## 2.1.0 — 2026-11-24
+
+### Changed
+
+- The app is now called **Sablja Manga Reader App** (window title, tray, installer, shortcuts).
+  The installer is now `SabljaMangaReaderApp-Setup.exe` and the exe `SabljaMangaReaderApp.exe`; the GitHub repo
+  is `Sablja-Manga-Reader-App`. The install folder and `data` folder keep their names, so your library is
+  unaffected, and releases also carry a `SabljaReader-Setup.exe` copy so older versions can still update.
+- Random: four recommendations in a 2x2 grid of rectangles that always fills the window, whatever its size.
+  Each has the cover on the left and the title (shown once), source, genres, Open and bookmark on the right.
+
 ## 2.0.0 — 2026-11-22
 
 A new app from the ground up. Your library, progress, ratings, folders and downloads carry over: the

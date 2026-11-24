@@ -224,7 +224,7 @@ class SettingsView:
             self.app.toast("Image cache cleared")
 
         return self.section("Data", ft.Icons.STORAGE,
-                            muted(f"Sablja Reader {APP_VERSION}. Your library lives in {DATA}", 12),
+                            muted(f"Sablja Manga Reader App {APP_VERSION}. Your library lives in {DATA}", 12),
                             ft.Row([ft.OutlinedButton("Open data folder", icon=ft.Icons.FOLDER_OPEN,
                                                       on_click=lambda e: open_path(DATA)),
                                     ft.OutlinedButton("Clear image cache", icon=ft.Icons.DELETE_SWEEP,

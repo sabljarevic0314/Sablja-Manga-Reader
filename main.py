@@ -1,4 +1,4 @@
-"""Sablja Reader (Flet UI) - entry point.
+"""Sablja Manga Reader App (Flet UI) - entry point.
 
 Run:  .venv\\Scripts\\python main.py
 """

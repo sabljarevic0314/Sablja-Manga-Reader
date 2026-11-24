@@ -1,4 +1,4 @@
-# Sablja Reader — project instructions
+# Sablja Manga Reader App — project instructions
 
 These rules are non-negotiable. They exist because the same source bugs kept coming back.
 
@@ -82,4 +82,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
 ```
 
 `build.ps1` runs `flet pack` (exe + `sources.json` in `dist\`). The installer is a separate step;
-`dist\SabljaReader-Setup.exe` is not refreshed by `build.ps1` alone.
+`dist\SabljaMangaReaderApp-Setup.exe` is not refreshed by `build.ps1` alone.

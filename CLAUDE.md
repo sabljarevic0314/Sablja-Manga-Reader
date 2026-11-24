@@ -1,8 +1,8 @@
-# Sablja Reader — notes for Claude
+# Sablja Manga Reader App — notes for Claude
 
 Windows desktop manga/webtoon reader written in Python with **Flet 1.1.2** (Flutter), the same toolkit
 as the owner's Sablja Fitness. Current version: **2.0.0** (`config.py`, `APP_VERSION`).
-Repo: `sabljarevic0314/Sablja-Manga-Reader`. Windows only (Linux was dropped in 2.0).
+Repo: `sabljarevic0314/Sablja-Manga-Reader-App`. Windows only (Linux was dropped in 2.0).
 
 **Read `AGENTS.md` before touching any source.** It holds the non-negotiable rules for sources
 (pagination, live testing, cheap cards, NSFW ordering, chapter picker, no MangaDex). This file is the map;
@@ -27,10 +27,10 @@ AGENTS.md is the law.
 | `stats.py` | Reading log (`DB["log"]`, one row per day): time, pages, chapters, series; streak, goals. |
 | `assets.py` | The app icon (`make_icon`, `make_icon_file`). |
 | `autoprobe.py` | `python autoprobe.py <listing-url>`: probes a site and suggests selectors for a new source. |
-| `build.ps1` | `flet pack` → `dist\SabljaReader.exe` (one file, GIFs inside) + `dist\sources.json`. Uses `.venv` if present. |
-| `installer\make_setup.ps1`, `installer\SabljaReader.nsi` | NSIS installer `dist\SabljaReader-Setup.exe`. Not refreshed by `build.ps1`. The installer closes the app (`taskkill /T`, then `/T /F`: the Flutter window is a child `flet.exe`). |
+| `build.ps1` | `flet pack` → `dist\SabljaMangaReaderApp.exe` (one file, GIFs inside) + `dist\sources.json`. Uses `.venv` if present. |
+| `installer\make_setup.ps1`, `installer\SabljaMangaReaderApp.nsi` | NSIS installer `dist\SabljaMangaReaderApp-Setup.exe`. Not refreshed by `build.ps1`. The installer closes the app (`taskkill /T`, then `/T /F`: the Flutter window is a child `flet.exe`). |
 | `.github\workflows\` | `ci.yml` (compile + JSON check on push), `release.yml` (tag → exe + installer on the release). |
-| `Test Sablja Reader.bat` | Owner's launcher for testing from source with a copy of the installed library. |
+| `Test Sablja Manga Reader App.bat` | Owner's launcher for testing from source with a copy of the installed library. |
 | `CHANGELOG.md`, `README.md`, `ROADMAP.md` | Release notes, user docs, ideas. Update the changelog for user-visible changes. |
 
 Runtime data lives in `data\` next to the exe (repo: `data\`, installed: `%LOCALAPPDATA%\Programs\SabljaReader\data`):
@@ -41,7 +41,7 @@ fix.** The installer and updater promise to leave it alone. The packed exe unpac
 
 ## Running and verifying
 
-Run from source: `.venv\Scripts\python main.py` (or `Test Sablja Reader.bat`). `curl_cffi` is needed for
+Run from source: `.venv\Scripts\python main.py` (or `Test Sablja Manga Reader App.bat`). `curl_cffi` is needed for
 Cloudflare-protected sources (MangaHub).
 
 Checks (same as CI):
@@ -65,7 +65,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
 ```
 
 When testing a built exe, copy it to a scratch folder first (it uses the `data\` next to it) and only ever
-stop that copy's processes by PID: killing `SabljaReader.exe` by name would also kill the owner's installed app.
+stop that copy's processes by PID: killing `SabljaMangaReaderApp.exe` by name would also kill the owner's installed app.
 
 Releasing: bump `APP_VERSION` in `config.py`, add a `CHANGELOG.md` entry, commit, and push a version tag.
 The release workflow builds and attaches the installer, which is what the in-app updater downloads.

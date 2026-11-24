@@ -1,4 +1,4 @@
-# Sablja Reader roadmap
+# Sablja Manga Reader App roadmap
 
 Ideas collected on 2026-11-22. Tick them off or move them as they ship.
 

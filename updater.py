@@ -38,7 +38,7 @@ def fetch_latest_release():
     """Latest public GitHub release, as a small dict the UI can render. Runs on a worker thread."""
     r = requests.get(GITHUB_API, timeout=12,
                      headers={"Accept": "application/vnd.github+json",
-                              "User-Agent": f"SabljaReader/{APP_VERSION}"})
+                              "User-Agent": f"SabljaMangaReaderApp/{APP_VERSION}"})
     r.raise_for_status()
     j = r.json()
     tag = str(j.get("tag_name") or "").strip()
@@ -57,11 +57,11 @@ def download_release_asset(info):
     if not url.startswith(f"{REPO_URL}/releases/download/"):
         raise RuntimeError("unexpected download URL")
     tag = re.sub(r"[^0-9A-Za-z._-]+", "_", str(info.get("tag") or "latest"))
-    dest = os.path.join(tempfile.gettempdir(), f"SabljaReader-Setup-{tag}.exe")
+    dest = os.path.join(tempfile.gettempdir(), f"SabljaMangaReaderApp-Setup-{tag}.exe")
     part = dest + ".part"
     h = hashlib.sha256()
     with requests.get(url, stream=True, timeout=120,
-                      headers={"User-Agent": f"SabljaReader/{APP_VERSION}"}) as r:
+                      headers={"User-Agent": f"SabljaMangaReaderApp/{APP_VERSION}"}) as r:
         r.raise_for_status()
         with open(part, "wb") as f:
             for chunk in r.iter_content(1 << 16):

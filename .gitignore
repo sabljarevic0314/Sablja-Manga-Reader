@@ -2,7 +2,7 @@
 /build/
 /dist/
 *.spec.bak
-/SabljaReader.spec
+/SabljaMangaReaderApp.spec
 
 # ---- your library, progress, cache and downloads: never commit these ----
 /data/

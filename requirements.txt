@@ -1,4 +1,4 @@
-# Sablja Reader - run from source with:
+# Sablja Manga Reader App - run from source with:
 #   pip install -r requirements.txt
 #   python main.py
 # Building the exe also needs:  pip install pyinstaller flet-cli==1.1.2   (then .\build.ps1)

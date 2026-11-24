@@ -71,7 +71,7 @@ class App:
     def set_tray(self):
         want = bool(S("notify_new")) and HAVE_TRAY
         if want and self.tray is None:
-            self.tray = Tray(make_icon(64), post, [("Open Sablja Reader", self.restore, True),
+            self.tray = Tray(make_icon(64), post, [("Open Sablja Manga Reader App", self.restore, True),
                                                    ("Quit", lambda: self.page.run_task(self.quit), False)])
             if not self.tray.start():
                 self.tray = None
@@ -82,7 +82,7 @@ class App:
     def notify(self, title, text):
         if self.tray is not None:
             if self._locked:                    # a toast must not show titles while the app is locked
-                title, text = "Sablja Reader", title
+                title, text = "Sablja Manga Reader App", title
             self.tray.notify(title, text)
 
     def restore(self):
@@ -123,7 +123,7 @@ class App:
         from .reader import ReaderView
         from .settings import SettingsView
         page = self.page
-        page.title = "Sablja Reader"
+        page.title = "Sablja Manga Reader App"
         page.padding = 0
         page.spacing = 0
         apply_theme(page)
@@ -244,7 +244,7 @@ class App:
             self.pump.mark()
 
         field.on_submit = go
-        self.page.show_dialog(ft.AlertDialog(modal=True, title=ft.Text("Sablja Reader is locked"),
+        self.page.show_dialog(ft.AlertDialog(modal=True, title=ft.Text("Sablja Manga Reader App is locked"),
                                              content=ft.Column([field, msg], tight=True),
                                              actions=[ft.FilledButton("Unlock", on_click=go)]))
 

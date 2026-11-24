@@ -36,8 +36,13 @@ jobs:
       - name: Build the installer
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
 
+      - name: Keep the pre-rename asset name for old in-app updaters
+        run: Copy-Item dist\SabljaMangaReaderApp-Setup.exe dist\SabljaReader-Setup.exe
+
       - name: Publish the GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/SabljaReader-Setup.exe
+          files: |
+            dist/SabljaMangaReaderApp-Setup.exe
+            dist/SabljaReader-Setup.exe
           generate_release_notes: true

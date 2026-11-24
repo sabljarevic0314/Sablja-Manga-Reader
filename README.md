@@ -1,11 +1,11 @@
-# Sablja Reader
+# Sablja Manga Reader App
 
 A desktop manga / manhwa / webtoon reader for Windows. Dark by default (with a *White* theme),
 webtoon (vertical strip), single, double and right-to-left paged reading, a library with folders,
 ratings, history and reading stats, chapter downloads, and a random roll when you don't know what
 to read next.
 
-**It hosts no content.** Sablja Reader is only a client application. It does not host, store,
+**It hosts no content.** Sablja Manga Reader App is only a client application. It does not host, store,
 upload or distribute any manga. It reads pages from the sources you enable in `sources.json`, using
 the official API where one exists (for example WEBTOON). Which sources you enable, and what you read
 or download from them, is your decision and your responsibility — see [Legal notice](#legal-notice).
@@ -14,10 +14,10 @@ or download from them, is your decision and your responsibility — see [Legal n
 
 ## Installing — 2 minutes
 
-> **No programming, no Python, no admin rights.** You need exactly one file: `SabljaReader-Setup.exe`.
+> **No programming, no Python, no admin rights.** You need exactly one file: `SabljaMangaReaderApp-Setup.exe`.
 
 1. Go to the [Releases](../../releases) page.
-2. Open the newest release and under **Assets** download **`SabljaReader-Setup.exe`**.
+2. Open the newest release and under **Assets** download **`SabljaMangaReaderApp-Setup.exe`**.
    *(Ignore the "Source code" entries — those are only for developers.)*
 3. Double-click it. If SmartScreen shows *"Windows protected your PC"* (the app is not code-signed),
    click **More info → Run anyway**.
@@ -37,7 +37,7 @@ The app checks GitHub for a new version once a day (switch it off in **Settings 
 **Check for updates** there). When there is one you can read what changed and press
 **Download & install**: the app downloads the installer, checks its SHA-256 against the release, backs
 up `db.json` to `data\backups\`, closes and runs the update. Your library stays where it is.
-Downloading the newest `SabljaReader-Setup.exe` by hand and running it does the same.
+Downloading the newest `SabljaMangaReaderApp-Setup.exe` by hand and running it does the same.
 
 Coming from 1.x? Just install 2.0 over it (or let 1.x update itself). Everything in `data\` carries over.
 
@@ -141,7 +141,7 @@ check it, such as MangaHub. Sites change their HTML regularly; if one stops work
 Adding a source from scratch? `python autoprobe.py <listing-url>` probes a page and writes
 `autoprobe_<host>.txt` with the selectors it found. Only use it on sites you are allowed to access.
 
-**Sablja Reader does not endorse, operate or recommend any particular source.** If you add or use a
+**Sablja Manga Reader App does not endorse, operate or recommend any particular source.** If you add or use a
 source, you are responsible for making sure you are allowed to read it: check the site's terms and the
 copyright status of what it offers, prefer sources published with the rights holders' permission, keep
 your request rate low and respect `robots.txt`.
@@ -161,7 +161,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Or double-click **`Test Sablja Reader.bat`**: it sets up `.venv` the first time and can start you off
+Or double-click **`Test Sablja Manga Reader App.bat`**: it sets up `.venv` the first time and can start you off
 with a copy of your installed library (the installed one is never changed). A source checkout keeps
 its own `data\` folder in the repo.
 
@@ -173,8 +173,8 @@ pip install pyinstaller flet-cli==1.1.2
 powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\make_setup.ps1
 ```
 
-`build.ps1` runs `flet pack` and writes a single-file `dist\SabljaReader.exe` (with the GIFs inside) plus
-`dist\sources.json`. `make_setup.ps1` wraps them into `dist\SabljaReader-Setup.exe` with NSIS (it
+`build.ps1` runs `flet pack` and writes a single-file `dist\SabljaMangaReaderApp.exe` (with the GIFs inside) plus
+`dist\sources.json`. `make_setup.ps1` wraps them into `dist\SabljaMangaReaderApp-Setup.exe` with NSIS (it
 downloads a portable NSIS if `makensis` isn't installed).
 
 ### Releasing
@@ -187,7 +187,7 @@ a Windows runner and attaches it to the release, which is what the in-app update
 
 ## Legal notice
 
-* Sablja Reader is an independent hobby project. It is not affiliated with, endorsed by or sponsored by
+* Sablja Manga Reader App is an independent hobby project. It is not affiliated with, endorsed by or sponsored by
   any manga publisher, scanlation group, website or API provider. All trademarks and content belong to
   their respective owners.
 * The rail GIFs are fan-made animations of characters from *Dragon Ball*, *One Piece*, *Naruto* and

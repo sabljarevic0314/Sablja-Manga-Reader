@@ -28,7 +28,7 @@ class Tray:
 
         try:
             menu = pystray.Menu(*[pystray.MenuItem(label, wrap(fn), default=dflt) for label, fn, dflt in entries])
-            self.icon = pystray.Icon("SabljaReader", image, "Sablja Reader", menu)
+            self.icon = pystray.Icon("SabljaMangaReaderApp", image, "Sablja Manga Reader App", menu)
         except Exception:
             self.icon = None
 
