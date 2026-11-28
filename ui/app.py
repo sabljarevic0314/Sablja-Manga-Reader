@@ -127,7 +127,7 @@ class App:
         page.padding = 0
         page.spacing = 0
         apply_theme(page)
-        logo = os.path.join(DATA, "logo64.png")
+        logo = os.path.join(DATA, "logo64-v2.png")
         if not os.path.exists(logo):
             make_icon(128).resize((64, 64)).save(logo)
         self.views = {"Library": LibraryView(self), "History": HistoryView(self), "Rating": RatingView(self),
@@ -417,7 +417,7 @@ class App:
 async def main(page: ft.Page):
     page.window.min_width, page.window.min_height = 760, 560
     page.window.width, page.window.height = 1320, 860
-    ico = os.path.join(DATA, "sablja3.ico")
+    ico = os.path.join(DATA, "sablja4.ico")
     if not os.path.exists(ico):
         make_icon_file(ico)
     page.window.icon = ico

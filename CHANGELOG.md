@@ -3,6 +3,13 @@
 All notable changes to Sablja Reader are listed here. The app version is shown in
 **Settings → Updates**.
 
+## 2.1.1 — 2026-11-28
+
+### Changed
+
+- New app icon: a big "S" over black-and-white manga panels with a sabre behind it (it replaces the "SR"
+  badge).
+
 ## 2.1.0 — 2026-11-24
 
 ### Changed

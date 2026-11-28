@@ -38,7 +38,7 @@ DEFAULTS = {"mode": MODES[0], "dl_delay": 1.0, "dl_order": "Oldest first",
             "lib_sort": "Recent", "lib_size": "M", "last_source": "", "reader_zoom": 1.0,
             "reader_bar": True}
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 
 REPO_URL = "https://github.com/sabljarevic0314/Sablja-Manga-Reader-App"
 GITHUB_API = "https://api.github.com/repos/sabljarevic0314/Sablja-Manga-Reader-App/releases/latest"
