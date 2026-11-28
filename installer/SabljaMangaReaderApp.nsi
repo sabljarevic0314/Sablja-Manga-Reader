@@ -88,6 +88,9 @@ Section "Sablja Manga Reader App" SecMain
   CreateShortCut "$SMPROGRAMS\Sablja Manga Reader App\Sablja Manga Reader App.lnk" "$INSTDIR\SabljaMangaReaderApp.exe"
   CreateShortCut "$SMPROGRAMS\Sablja Manga Reader App\Uninstall Sablja Manga Reader App.lnk" "$INSTDIR\uninstall.exe"
   CreateShortCut "$DESKTOP\Sablja Manga Reader App.lnk" "$INSTDIR\SabljaMangaReaderApp.exe"
+
+  ; Windows keeps the old icon for an exe path it has seen: SHCNE_ASSOCCHANGED makes it reload icons
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
 
 Section "Uninstall"

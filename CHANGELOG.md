@@ -10,6 +10,11 @@ All notable changes to Sablja Reader are listed here. The app version is shown i
 - New app icon: a big "S" over black-and-white manga panels with a sabre behind it (it replaces the "SR"
   badge).
 
+### Fixed
+
+- The installer tells Windows to reload icons, so shortcuts do not keep showing the previous app icon after an
+  upgrade.
+
 ## 2.1.0 — 2026-11-24
 
 ### Changed
